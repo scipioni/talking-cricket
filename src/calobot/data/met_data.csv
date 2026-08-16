@@ -1,0 +1,72 @@
+name_it,intensity,met,source_note
+camminata,lenta,2.8,walking ~3km/h on level ground; widely documented physiological estimate
+camminata,media,3.5,walking ~5km/h on level ground; widely documented physiological estimate
+camminata,svelta,4.3,brisk walking ~6km/h; widely documented physiological estimate
+camminata in montagna,,6.0,hiking with pack, uneven terrain
+corsa,leggera,7.0,jogging ~8km/h
+corsa,media,9.8,running ~10km/h
+corsa,veloce,11.5,running ~12.5km/h
+corsa in salita,,15.0,uphill running
+bicicletta,leggera,5.8,leisure cycling <16km/h
+bicicletta,media,7.5,cycling 16-19km/h
+bicicletta,sostenuta,10.0,cycling 19-22km/h
+bicicletta,intensa,12.0,cycling >22km/h or racing
+spinning,,8.5,indoor cycling class
+nuoto,leggero,5.8,recreational swimming, moderate effort
+nuoto,medio,7.0,swimming laps, moderate-vigorous
+nuoto,intenso,10.0,swimming laps, vigorous
+acquagym,,4.5,water aerobics
+palestra pesi,,5.0,resistance training, general
+palestra pesi,intenso,6.0,resistance training, vigorous effort
+crossfit,,8.0,high intensity functional training
+yoga,,2.5,hatha yoga, general
+pilates,,3.0,general pilates
+stretching,,2.3,general stretching
+allenamento funzionale,,6.5,circuit/functional training
+hiit,,8.5,high intensity interval training
+calcio,,7.0,recreational soccer/football
+calcetto,,7.0,five-a-side football
+basket,,6.5,recreational basketball
+pallavolo,,4.0,recreational volleyball
+tennis,,7.3,singles tennis
+padel,,6.0,padel, general play
+squash,,10.0,squash, general play
+golf,,4.3,golf, walking, carrying clubs
+sci alpino,,6.0,downhill skiing, general
+sci di fondo,,8.0,cross country skiing
+snowboard,,5.3,snowboarding, general
+pattinaggio,,7.0,ice or roller skating, general
+ballo,leggero,3.0,social dancing, slow
+ballo,sostenuto,5.5,aerobic/fast dancing
+zumba,,6.5,zumba fitness class
+arrampicata,,8.0,rock climbing, general
+canottaggio,,7.0,rowing machine, moderate effort
+canoa,,5.0,canoeing, recreational
+vogatore,,7.0,rowing ergometer, general
+step,,8.5,step aerobics
+salto con la corda,,10.0,jump rope, moderate pace
+arti marziali,,10.3,martial arts, general
+boxe,allenamento,7.8,boxing training/sparring
+pulizie di casa,,3.0,general household cleaning
+giardinaggio,,4.0,general gardening
+lavare l'auto,,3.0,washing the car by hand
+salire le scale,,8.8,climbing stairs
+portare la spesa,,4.0,carrying groceries
+stare in piedi,,1.8,standing, light activity
+scrivania,,1.3,sedentary desk work
+guidare,,2.0,driving a car
+sesso,,1.8,widely documented physiological estimate
+suonare uno strumento,,2.0,playing a musical instrument, seated
+canto,,2.0,singing, standing
+escursionismo,,5.3,hiking, cross-country, general
+equitazione,,4.0,horseback riding, general
+pesca,,2.5,fishing from bank or boat, sitting
+caccia,,3.5,hunting, walking, general
+badminton,,5.5,badminton, general play
+ping pong,,4.0,table tennis, general
+rugby,,8.3,rugby, general play
+softball,,5.0,softball or baseball, general
+frisbee,,3.0,frisbee, general play
+skateboard,,5.0,skateboarding, general
+pattini a rotelle,,7.0,rollerblading, general
+trekking,,6.0,backpacking, general

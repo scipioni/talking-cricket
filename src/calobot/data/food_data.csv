@@ -1,0 +1,162 @@
+source_name_en,kcal_per_100g,aliases_it
+"Nuts, walnuts, english",654.0,noci;noce;gherigli di noce
+"Nuts, almonds",579.0,mandorle;mandorla
+"Nuts, hazelnuts or filberts",628.0,nocciole;nocciola
+"Nuts, pistachio nuts, raw",560.0,pistacchi;pistacchio
+"Nuts, cashew nuts, raw",553.0,anacardi;anacardo
+"Peanuts, all types, raw",567.0,arachidi;noccioline americane
+"Nuts, pine nuts, dried",673.0,pinoli
+"Nuts, brazilnuts, dried, unblanched",659.0,noci brasiliane
+"Nuts, pecans",691.0,noci pecan
+"Nuts, chestnuts, european, roasted",245.0,castagne;marroni
+"Apples, gala, with skin, raw",61.0,mela;mele
+"Bananas, raw",89.0,banana;banane
+"Oranges, raw, all commercial varieties",47.0,arancia;arance
+"Pears, raw",57.0,pera;pere
+"Grapes, red or green (European type, such as Thompson seedless), raw",69.0,uva
+"Strawberries, raw",32.0,fragola;fragole
+"Blueberries, raw",57.0,mirtilli;mirtillo
+"Kiwifruit, green, raw",61.0,kiwi
+"Peaches, yellow, raw",39.0,pesca;pesche
+"Apricots, raw",48.0,albicocca;albicocche
+"Plums, raw",46.0,prugna;prugne;susina
+"Watermelon, raw",30.0,anguria;cocomero
+"Melons, cantaloupe, raw",34.0,melone
+"Pineapple, raw, all varieties",50.0,ananas
+"Mangos, raw",60.0,mango
+"Cherries, sweet, raw",63.0,ciliegia;ciliegie
+"Figs, raw",74.0,fico;fichi
+"Dates, deglet noor",282.0,datteri;dattero
+"Raisins, dark, seedless",299.0,uvetta;uva passa
+"Lemons, raw, without peel",29.0,limone;limoni
+"Tomatoes, red, ripe, raw, year round average",18.0,pomodoro;pomodori;pomodorino
+"Cucumber, with peel, raw",15.0,cetriolo;cetrioli
+"Lettuce, iceberg (includes crisphead types), raw",14.0,lattuga;insalata
+"Carrots, raw",41.0,carota;carote
+"Squash, summer, zucchini, includes skin, raw",17.0,zucchina;zucchine;courgette
+"Eggplant, raw",25.0,melanzana;melanzane
+"Peppers, sweet, red, raw",26.0,peperone;peperoni
+"Broccoli, raw",34.0,broccoli;broccolo
+"Cauliflower, raw",25.0,cavolfiore
+"Spinach, raw",23.0,spinaci
+"Potatoes, boiled, cooked in skin, flesh, without salt",87.0,patata bollita;patate bollite
+"Potatoes, red, flesh and skin, baked",87.0,patata al forno;patate al forno
+"Sweet potato, raw, unprepared",86.0,patata dolce;patata americana
+"Onions, raw",40.0,cipolla;cipolle
+"Garlic, raw",149.0,aglio
+"Beans, snap, green, raw",31.0,fagiolini
+"Peas, green, raw",81.0,piselli
+"Mushrooms, white, raw",22.0,funghi;fungo;champignon
+"Artichokes, (globe or french), raw",47.0,carciofo;carciofi
+"Fennel, bulb, raw",31.0,finocchio;finocchi
+"Asparagus, raw",20.0,asparagi;asparago
+"Celery, raw",14.0,sedano
+"Pumpkin, raw",26.0,zucca
+"Cabbage, raw",25.0,cavolo;verza
+"Beets, raw",43.0,barbabietola
+"Radishes, raw",16.0,ravanello;ravanelli
+"Rice, white, long-grain, regular, raw, enriched",365.0,riso;riso bianco
+"Rice, brown, long-grain, raw",367.0,riso integrale
+Pasta dry,371,pasta;pasta secca;spaghetti;penne;fusilli;maccheroni
+Pasta cooked,158,pasta cotta;pasta scolata
+"Bread, white, commercially prepared",270.0,pane;pane bianco;pane comune
+"Bread, whole-wheat, commercially prepared",252.0,pane integrale
+Breadsticks,428,grissini
+"Crackers, standard snack-type, regular",510.0,cracker
+Rusks,408,fette biscottate
+Couscous cooked,112,cuscus;couscous
+Polenta cooked,85,polenta
+"Cereals, QUAKER, Quick Oats, Dry",371.0,avena;fiocchi d'avena
+"Barley, pearled, raw",352.0,orzo
+"Bulgur, dry",342.0,bulgur
+"Wheat flour, white, all-purpose, unenriched",364.0,farina;farina di frumento;farina 00
+"Corn flour, whole-grain, yellow",361.0,farina di mais
+Pizza dough,266,impasto per pizza
+"Chickpeas (garbanzo beans, bengal gram), mature seeds, cooked, boiled, without salt",164.0,ceci
+"Lentils, mature seeds, cooked, boiled, without salt",116.0,lenticchie
+"Beans, white, mature seeds, cooked, boiled, without salt",139.0,fagioli;fagioli bianchi;cannellini
+Beans borlotti cooked,130,fagioli borlotti
+"Soybeans, mature seeds, cooked, boiled, with salt",172.0,soia
+"Tofu, raw, firm, prepared with calcium sulfate",144.0,tofu
+"Beef, round, eye of round, roast, separable lean only, trimmed to 1/8"" fat, all grades, raw",124.0,manzo;carne di manzo;bistecca di manzo
+Beef ground raw,254,macinato di manzo;carne macinata
+"Veal, leg (top round), separable lean only, raw",107.0,vitello;carne di vitello
+"Pork, fresh, loin, whole, separable lean only, raw",143.0,maiale;lonza di maiale;carne di maiale
+Pork sausage,296,salsiccia
+"Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw",120.0,pollo;petto di pollo
+"Chicken, broilers or fryers, dark meat, thigh, meat only, raw",121.0,coscia di pollo
+"Turkey, whole, breast, meat only, raw",114.0,tacchino;petto di tacchino
+"Lamb, leg, shank half, separable lean only, trimmed to 1/4"" fat, choice, raw",125.0,agnello;carne di agnello
+"Game meat, rabbit, domesticated, composite of cuts, raw",136.0,coniglio;carne di coniglio
+Prosciutto crudo,268,prosciutto crudo
+Prosciutto cotto,145,prosciutto cotto
+Bresaola,151,bresaola
+Salami,407,salame
+Mortadella,288,mortadella
+Bacon,417,pancetta;bacon
+"Fish, cod, Atlantic, raw",82.0,merluzzo;baccala
+"Fish, salmon, Atlantic, farmed, raw",208.0,salmone
+"Fish, tuna, fresh, bluefin, raw",144.0,tonno
+"Fish, tuna, light, canned in oil, drained solids",198.0,tonno in scatola;tonno sott'olio
+"Fish, sea bass, mixed species, raw",97.0,branzino;spigola
+Sea bream raw,96,orata
+"Crustaceans, shrimp, raw",85.0,gamberi;gamberetti;gambero
+"Mollusks, squid, mixed species, raw",92.0,calamari;calamaro
+"Mollusks, mussel, blue, raw",86.0,cozze
+"Mollusks, clam, mixed species, raw",86.0,vongole
+"Mollusks, octopus, common, raw",82.0,polpo
+"Fish, anchovy, european, raw",131.0,acciughe;alici
+"Egg, whole, raw, fresh",143.0,uova;uovo
+"Egg, white, raw, fresh",52.0,albume
+"Egg, yolk, raw, fresh",322.0,tuorlo
+"Milk, whole, 3.25% milkfat, with added vitamin D",61.0,latte;latte intero
+"Milk, fluid, nonfat, calcium fortified (fat free or skim)",35.0,latte scremato
+Milk semi skimmed,46,latte parzialmente scremato
+"Yogurt, plain, whole milk",61.0,yogurt;yogurt intero
+Yogurt greek,97,yogurt greco
+"Yogurt, plain, low fat",63.0,yogurt magro
+"Cheese, mozzarella, whole milk",299.0,mozzarella;fiordilatte
+"Cheese, parmesan, hard",392.0,parmigiano;grana padano;parmigiano reggiano
+"Cheese, ricotta, whole milk",150.0,ricotta
+Mascarpone,429,mascarpone
+Stracchino,280,stracchino;crescenza
+Gorgonzola,330,gorgonzola
+Pecorino,387,pecorino
+"Cheese, provolone",351.0,provolone
+"Cheese, feta",265.0,feta
+"Cheese, cream",350.0,formaggio spalmabile;philadelphia
+"Cream, fluid, heavy whipping",340.0,panna;panna da cucina;panna fresca
+"Butter, salted",717.0,burro
+"Oil, olive, salad or cooking",884.0,olio;olio d'oliva;olio extravergine
+"Oil, sunflower, linoleic, (approx. 65%)",884.0,olio di semi;olio di girasole
+"Sugars, granulated",387.0,zucchero;zucchero bianco
+Honey,304.0,miele
+Jams and preserves,278.0,marmellata;confettura
+Nutella,539,nutella;crema alla nocciola
+"Candies, SPECIAL DARK Chocolate Bar",556.0,cioccolato fondente
+"Candies, milk chocolate",535.0,cioccolato al latte;cioccolata
+"Cookies, graham crackers, plain or honey (includes cinnamon)",430.0,biscotti
+"Cereals ready-to-eat, RALSTON Corn Flakes",384.0,cereali;fiocchi di mais
+"Snacks, granola bars, hard, plain",471.0,muesli;granola
+"Croissants, butter",406.0,cornetto;brioche;croissant
+"Ice creams, vanilla",207.0,gelato;gelato alla vaniglia
+"Beverages, carbonated, cola, regular",42.0,coca cola;cola
+"Orange juice, raw",45.0,succo d'arancia;spremuta
+"Alcoholic beverage, beer, regular, all",43.0,birra
+"Alcoholic beverage, wine, table, red",85.0,vino;vino rosso
+"Alcoholic beverage, wine, table, white",82.0,vino bianco
+"Beverages, coffee, brewed, espresso, restaurant-prepared",9.0,caffe;espresso
+Cappuccino,45,cappuccino
+"Water, bottled, generic",0.0,acqua
+Catsup,101.0,ketchup
+"Salad dressing, mayonnaise, regular",680.0,maionese
+Pesto sauce,303,pesto;pesto alla genovese
+"Tomato sauce, canned, no salt added",24.0,sugo di pomodoro;passata di pomodoro
+"Vinegar, balsamic",88.0,aceto balsamico
+"Vinegar, red wine",19.0,aceto;aceto di vino
+"Spices, pepper, black",251.0,pepe;pepe nero
+"Salt, table",0.0,sale
+"Basil, fresh",23.0,basilico
+"Parsley, fresh",36.0,prezzemolo
+"Spices, oregano, dried",265.0,origano
+"Rosemary, fresh",131.0,rosmarino

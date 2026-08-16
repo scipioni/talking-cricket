@@ -1,0 +1,57 @@
+# Docker Swarm stack for calobot.
+#
+# IMPORTANT - single-replica is a correctness constraint, not a capacity choice:
+# SQLite permits exactly one writer. Running more than one replica of this
+# service would have each container write to its own view of a shared SQLite
+# file with no coordination between them, silently corrupting or diverging
+# the data. Do not raise `replicas` above 1, and do not add a second stack
+# pointing at the same volume. See design.md - Persistence in
+# openspec/changes/calobot-v1/ for the full rationale.
+#
+# The placement constraint pins the service to one node so the named volume
+# (which is local to that node, not shared storage) is always the same
+# physical disk. Do NOT back this volume with NFS/CIFS or any other network
+# filesystem - SQLite's locking is unreliable over those, and the failure
+# mode is silent corruption rather than a clean error. The application also
+# refuses to start against a database on a detected network filesystem
+# (calobot.persistence.startup_checks) as a second line of defense.
+
+version: "3.8"
+
+services:
+  calobot:
+    image: calobot:latest
+    environment:
+      CALOBOT_TELEGRAM_BOT_TOKEN: ${CALOBOT_TELEGRAM_BOT_TOKEN:?telegram bot token is required}
+      CALOBOT_LLM_BASE_URL: ${CALOBOT_LLM_BASE_URL:-https://ingegno.csgalileo.org/ollama/v1}
+      CALOBOT_LLM_API_KEY: ${CALOBOT_LLM_API_KEY:-ollama}
+      CALOBOT_LLM_MODEL: ${CALOBOT_LLM_MODEL:-qwen3-vl:30b-a3b-instruct}
+      CALOBOT_LLM_TEMPERATURE: ${CALOBOT_LLM_TEMPERATURE:-0.2}
+      CALOBOT_LLM_TIMEOUT_SECONDS: ${CALOBOT_LLM_TIMEOUT_SECONDS:-30}
+      CALOBOT_LLM_RETRY_LIMIT: ${CALOBOT_LLM_RETRY_LIMIT:-2}
+      CALOBOT_DATABASE_PATH: /data/calobot.db
+      CALOBOT_TIMEZONE_NAME: ${CALOBOT_TIMEZONE_NAME:-Europe/Rome}
+      CALOBOT_LOG_LEVEL: ${CALOBOT_LOG_LEVEL:-INFO}
+    volumes:
+      - calobot_data:/data
+    deploy:
+      replicas: 1  # correctness constraint - see comment above, do not change
+      placement:
+        constraints:
+          - node.labels.calobot-data == true
+      update_config:
+        order: stop-first  # never run two writers against the same volume, even briefly
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; sys.exit(0 if pathlib.Path('/data/calobot.db').exists() else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  calobot_data:
+    driver: local  # must stay local - see the single-writer note above

@@ -1,0 +1,189 @@
+# https://taskfile.dev
+#
+# Convenience wrappers around the same `uv`/`docker`/`git` commands documented in
+# README.md - nothing here does anything you couldn't type by hand, it just saves
+# retyping it. Run `task` or `task --list` to see everything.
+version: "3"
+
+vars:
+  IMAGE_NAME: '{{.IMAGE_NAME | default "calobot"}}'
+  # .env is written for the Docker/Swarm deployment and points at the container's
+  # /data volume mount, which doesn't exist (and can't be created) outside a
+  # container. Local, non-Docker runs use this repo-local path instead - the app
+  # creates the directory itself on startup, so no manual setup is needed.
+  LOCAL_DB_PATH: "./data/calobot.db"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  # --- Local development, no Docker (uv + a venv) -----------------------
+
+  setup:
+    desc: Create the virtualenv and install all dependencies with uv
+    cmds:
+      - uv sync
+    sources:
+      - pyproject.toml
+      - uv.lock
+
+  dev:
+    desc: Run the bot locally against .env, restarting on code changes (migrations + seed + long polling)
+    deps: [setup]
+    dotenv: [".env"]
+    env:
+      CALOBOT_DATABASE_PATH: "{{.LOCAL_DB_PATH}}"
+    cmds:
+      - uv run watchfiles calobot.main.run src
+
+  dev:once:
+    desc: Run the bot locally against .env, once, without watching for changes
+    deps: [setup]
+    dotenv: [".env"]
+    env:
+      CALOBOT_DATABASE_PATH: "{{.LOCAL_DB_PATH}}"
+    cmds:
+      - uv run python -m calobot.main
+
+  migrate:
+    desc: Apply pending Alembic migrations locally
+    deps: [setup]
+    dotenv: [".env"]
+    env:
+      CALOBOT_DATABASE_PATH: "{{.LOCAL_DB_PATH}}"
+    cmds:
+      - uv run alembic upgrade head
+
+  migration:
+    desc: 'Create a new Alembic migration: task migration -- "message"'
+    deps: [setup]
+    dotenv: [".env"]
+    env:
+      CALOBOT_DATABASE_PATH: "{{.LOCAL_DB_PATH}}"
+    cmds:
+      - uv run alembic revision --autogenerate -m "{{.CLI_ARGS}}"
+
+  test:
+    desc: "Run the test suite (extra args: task test -- -k weight)"
+    deps: [setup]
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  lint:
+    desc: Lint with ruff
+    deps: [setup]
+    cmds:
+      - uv run ruff check src/ tests/ scripts/
+
+  format:
+    desc: Auto-fix lint issues with ruff
+    deps: [setup]
+    cmds:
+      - uv run ruff check --fix src/ tests/ scripts/
+
+  typecheck:
+    desc: Type-check with mypy (moderate config - see pyproject.toml)
+    deps: [setup]
+    cmds:
+      - uv run mypy src/
+
+  check:
+    desc: Run lint, typecheck and the full test suite
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  clean:
+    desc: Remove the virtualenv and tool caches
+    cmds:
+      - rm -rf .venv .pytest_cache .mypy_cache .ruff_cache
+
+  # --- Docker -------------------------------------------------------------
+
+  docker:build:
+    desc: 'Build the local image (vars: IMAGE_NAME, TAG - default latest)'
+    vars:
+      TAG: '{{.TAG | default "latest"}}'
+    cmds:
+      - docker build -t {{.IMAGE_NAME}}:{{.TAG}} .
+
+  docker:run:
+    desc: Run the built image locally with .env (quick smoke test, no volume/Swarm)
+    deps: [docker:build]
+    cmds:
+      - docker run --rm --env-file .env {{.IMAGE_NAME}}:latest
+
+  docker:login:
+    desc: Log in to Docker Hub
+    cmds:
+      - docker login
+
+  docker:publish:
+    desc: >
+      Build, tag and push to Docker Hub as :latest and :vX.Y.Z (current
+      pyproject version). Usage: DOCKERHUB_NAMESPACE=yourusername task docker:publish
+    requires:
+      vars: [DOCKERHUB_NAMESPACE]
+    vars:
+      VERSION_TAG:
+        sh: grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/v\1/'
+      REMOTE_IMAGE: "{{.DOCKERHUB_NAMESPACE}}/{{.IMAGE_NAME}}"
+    cmds:
+      - docker build -t {{.REMOTE_IMAGE}}:latest -t {{.REMOTE_IMAGE}}:{{.VERSION_TAG}} .
+      - docker push {{.REMOTE_IMAGE}}:latest
+      - docker push {{.REMOTE_IMAGE}}:{{.VERSION_TAG}}
+      - echo "Published {{.REMOTE_IMAGE}}:latest and {{.REMOTE_IMAGE}}:{{.VERSION_TAG}}"
+
+  # --- Releases (semver bump + local commit/tag; pushing is a separate,
+  #     explicit step so a release is never silently published) -------------
+
+  release:patch:
+    desc: Bump the patch version (x.y.Z), commit and tag locally
+    cmds:
+      - task: _release
+        vars: { PART: patch }
+
+  release:minor:
+    desc: Bump the minor version (x.Y.0), commit and tag locally
+    cmds:
+      - task: _release
+        vars: { PART: minor }
+
+  release:major:
+    desc: Bump the major version (X.0.0), commit and tag locally
+    cmds:
+      - task: _release
+        vars: { PART: major }
+
+  release:push:
+    desc: "Push the current branch and its tags (run after a release:* task)"
+    cmds:
+      - git push
+      - git push --tags
+
+  _release:
+    # NOTE: the version bump deliberately happens inside `cmds`, not a `vars.sh`.
+    # Task vars with `sh:` are evaluated eagerly to resolve templates - including
+    # under `--dry` - so a bump script living there would run (and mutate
+    # pyproject.toml) even on a dry run or a failed precondition. Keeping it in
+    # cmds means it only runs for real, after preconditions have passed, and
+    # `task --dry release:patch` is genuinely side-effect-free.
+    internal: true
+    preconditions:
+      - sh: '[ -z "$(git status --porcelain)" ]'
+        msg: "Working tree is not clean - commit or stash your changes before releasing."
+    cmds:
+      - uv run python scripts/bump_version.py {{.PART}}
+      - uv lock
+      - git add pyproject.toml uv.lock
+      - |
+        NEW_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+        git commit -m "chore: release v${NEW_VERSION}"
+        git tag "v${NEW_VERSION}"
+        echo "Bumped to v${NEW_VERSION}, committed and tagged locally."
+        echo "Next: 'task release:push' to publish the tag, and/or"
+        echo "      'DOCKERHUB_NAMESPACE=<you> task docker:publish' to publish the image."

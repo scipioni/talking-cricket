@@ -1,0 +1,127 @@
+"""Turns an ActivityExtraction into a draft item, decides what's missing (duration,
+and intensity when it materially changes MET), and finalizes into a stored entry.
+See specs/activity-logging - Duration missing, Intensity clarification, Energy
+expenditure computation, Activity does not alter the calorie budget."""
+
+from __future__ import annotations
+
+import datetime as dt
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from calobot.activity.resolver import resolve_met
+from calobot.ingestion.schemas import ActivityExtraction
+from calobot.llm.gateway import LLMGateway
+from calobot.persistence.candidates import retrieve_met_candidates
+from calobot.persistence.models import ActivityEntry, Provenance
+from calobot.persistence.timeutil import utcnow
+
+DURATION_OPTIONS_MIN = {"15 min": 15, "30 min": 30, "45 min": 45, "60 min": 60}
+
+# MET values within this ratio of each other are treated as "not materially different",
+# so an unmatched intensity doesn't trigger a clarification when it wouldn't move the number.
+MATERIAL_MET_RATIO = 1.3
+
+
+@dataclass(frozen=True)
+class ClarificationNeeded:
+    field: str
+    question_text: str
+    options: list[str]
+
+
+@dataclass(frozen=True)
+class FinalizedActivity:
+    entry: ActivityEntry
+    is_estimate: bool
+
+
+def build_items(extraction: ActivityExtraction) -> list[dict[str, Any]]:
+    item = extraction.model_dump()
+    item["resolved"] = {}
+    return [item]
+
+
+async def check_item(
+    session: AsyncSession, item: dict[str, Any]
+) -> ClarificationNeeded | None:
+    resolved = item.get("resolved", {})
+
+    if item.get("duration_minutes") is None and "duration_minutes" not in resolved:
+        return ClarificationNeeded(
+            field="duration_minutes",
+            question_text=f"Quanto è durata l'attività ({item['activity_description']})?",
+            options=list(DURATION_OPTIONS_MIN.keys()),
+        )
+
+    if not item.get("intensity_text") and "intensity" not in resolved:
+        candidates = await retrieve_met_candidates(session, item["activity_description"])
+        same_name = [c for c in candidates if c.name_it == item["activity_description"]]
+        intensities = {c.intensity for c in same_name if c.intensity}
+        if len(intensities) > 1:
+            mets = [c.met for c in same_name if c.intensity]
+            if max(mets) / min(mets) >= MATERIAL_MET_RATIO:
+                return ClarificationNeeded(
+                    field="intensity",
+                    question_text=f"A che intensità hai fatto {item['activity_description']}?",
+                    options=sorted(intensities),
+                )
+
+    return None
+
+
+def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str, Any]:
+    resolved = dict(item.get("resolved", {}))
+    if field == "duration_minutes":
+        minutes = DURATION_OPTIONS_MIN.get(raw_answer) or _parse_minutes_free_text(raw_answer)
+        if minutes is not None:
+            resolved["duration_minutes"] = minutes
+    elif field == "intensity" and raw_answer.strip():
+        resolved["intensity"] = raw_answer.strip()
+    return {**item, "resolved": resolved}
+
+
+def _parse_minutes_free_text(text: str) -> float | None:
+    match = re.search(r"(\d+(?:[.,]\d+)?)", text)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def resolve_when(when_text: str | None, now: dt.datetime | None = None) -> dt.datetime:
+    now = now or utcnow()
+    if when_text and "ieri" in when_text.lower():
+        return now - dt.timedelta(days=1)
+    return now
+
+
+async def finalize_item(
+    session: AsyncSession,
+    gateway: LLMGateway,
+    user_id: int,
+    item: dict[str, Any],
+    current_weight_kg: float,
+) -> FinalizedActivity:
+    resolved = item["resolved"]
+    duration_minutes = item.get("duration_minutes") or resolved["duration_minutes"]
+    intensity_text = item.get("intensity_text") or resolved.get("intensity")
+
+    met_result = await resolve_met(session, gateway, item["activity_description"], intensity_text)
+    kcal = met_result.met * current_weight_kg * (duration_minutes / 60.0)
+
+    entry = ActivityEntry(
+        user_id=user_id,
+        activity=item["activity_description"],
+        duration_minutes=duration_minutes,
+        met=met_result.met,
+        kcal=kcal,
+        provenance=met_result.provenance,
+        performed_at=resolve_when(item.get("when_text")),
+    )
+    session.add(entry)
+    await session.flush()
+
+    return FinalizedActivity(entry=entry, is_estimate=met_result.provenance == Provenance.llm)

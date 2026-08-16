@@ -1,0 +1,84 @@
+[project]
+name = "calobot"
+version = "0.1.0"
+description = "Telegram virtual nutritionist bot: LLM-parsed food, weight and activity tracking with charts"
+readme = "README.md"
+authors = [
+    { name = "Stefano Scipioni", email = "scipio.it@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.13",
+    "aiosqlite>=0.22.1",
+    "alembic>=1.19.1",
+    "matplotlib>=3.11.1",
+    "openai>=3.1.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "rapidfuzz>=3.9",
+    "sqlalchemy>=2.0",
+    "tzdata>=2026.3",
+]
+
+[project.scripts]
+calobot = "calobot.main:run"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.3",
+    "watchfiles>=1.2.0",
+]
+
+[tool.ruff]
+line-length = 115
+target-version = "py312"
+extend-exclude = ["src/calobot/persistence/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+# Not full `strict`: this codebase leans on small untyped helper closures and
+# tagged-union tuples (kind: Literal, entry: A|B|C) that mypy can't narrow well
+# without heavier refactoring than the project's size warrants. Kept moderate
+# rather than strict so it still catches real bugs (see fixes from this pass)
+# without demanding exhaustive annotation of every private helper.
+
+# Known, accepted limitation (see openspec/changes/calobot-v1/tasks.md, task 14
+# note): these modules thread an entry through as
+# tuple[str, FoodEntry | ActivityEntry | WeightEntry] and mypy cannot narrow the
+# union from the string tag alone. Every call site is covered by passing tests;
+# reworking this to a properly narrowable (isinstance-based) type was judged
+# disproportionate effort for the project's size. Suppressed per-module, not
+# globally, so mypy still catches real bugs everywhere else.
+[[tool.mypy.overrides]]
+module = [
+    "calobot.persistence.repository",
+    "calobot.reporting.aggregation",
+    "calobot.corrections.service",
+]
+disable_error_code = ["union-attr", "attr-defined", "arg-type", "return-value", "misc"]
+
+# matplotlib's type stubs don't accept a list[datetime.date] for x-values, though
+# matplotlib handles date objects correctly at runtime via its own date/number
+# conversion (verified by test_render_charts_produce_png_bytes).
+[[tool.mypy.overrides]]
+module = "calobot.reporting.charts"
+disable_error_code = ["arg-type"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
