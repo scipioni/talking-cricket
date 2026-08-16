@@ -59,6 +59,46 @@ _CORRECTION_MARKERS = [
 ]
 
 
+ABANDON_OPTION = "❌ lascia perdere"
+
+# Wording for each successive ask about the same field. A user who did not understand
+# the question is shown a differently worded one, which is the only chance the second
+# attempt has of doing better than the first - the loop used to repeat "Non ho capito."
+# verbatim until the draft expired.
+#
+# A fixed rotation rather than a model call: rephrasing costs latency at the exact
+# moment the user is already stuck, to produce a sentence that can be written in
+# advance, and it would make the wording non-deterministic for scenarios to assert on.
+_REASK_PREFIXES = (
+    "Non ho capito.",
+    "Scusa, non riesco a ricavare il dato. Puoi usare uno dei pulsanti?",
+    "Ancora non ci siamo: scegli un'opzione qui sotto oppure scrivi un numero in grammi.",
+)
+
+
+def _reask_prefix(attempt: int) -> str:
+    """`attempt` is how many unusable answers have been given so far, so attempt 1 is
+    the first re-ask. Clamped rather than wrapped: the give-up limit is reached before
+    the rotation runs out (asserted in the tests), and clamping keeps the last, most
+    explicit wording if the limit is ever configured higher."""
+    return _REASK_PREFIXES[min(attempt, len(_REASK_PREFIXES)) - 1]
+
+
+def _without(text: str, aside: str | None) -> str:
+    """The message with the set-aside part removed, so what remains is the dominant
+    content. Falls back to the whole message when the aside is not a literal slice of
+    it - the classifier paraphrases sometimes, and a paraphrase is not something to
+    subtract by string surgery."""
+    if not aside:
+        return text.strip()
+    lowered, needle = text.lower(), aside.strip().lower()
+    if needle not in lowered:
+        return text.strip()
+    start = lowered.index(needle)
+    remainder = text[:start] + text[start + len(needle) :]
+    return remainder.strip(" ,.;:-\n\t")
+
+
 class MessagePipeline:
     def __init__(self, session: AsyncSession, gateway: LLMGateway, settings: Settings, user: User):
         self.session = session
@@ -100,7 +140,12 @@ class MessagePipeline:
                 )
             )
 
-        intent = classification.intent
+        intent: str = classification.intent
+        if intent == "other" and classification.ignored_text:
+            intent, content = await self._reroute_self_contradiction(
+                classification, content, raw_text
+            )
+
         if intent == "food":
             messages += await self._start_food(content)
         elif intent == "weight":
@@ -116,7 +161,75 @@ class MessagePipeline:
             messages.append(OutgoingMessage(text=reply))
         return messages
 
+    async def _reroute_self_contradiction(
+        self, classification, content: MessageContent, raw_text: str
+    ) -> tuple[str, MessageContent]:
+        """A classification of "conversation" that also reports loggable text it set
+        aside contradicts itself, and the contradiction is the routing signal.
+
+        This is what produced the worst failure the simulation harness found: a
+        message stating a meal, a weight and a run came back as
+        `{"intent": "other", "ignored_text": "peso oggi 89.3 kg, ho corso 4 km"}` -
+        conversation, while reporting the parts it had chosen not to treat as
+        dominant. The conversational reply then announced it had recorded all three
+        and stored none (specs/message-ingestion - A message carrying a loggable
+        intent is not conversation).
+
+        The dominant content is the *remainder*, not the ignored text: the ignored
+        text is what was set aside. Re-classifying the ignored text would have logged
+        the weight and lost the meal.
+
+        Costs one extra model call, and only in this contradictory case - an ordinary
+        greeting reports no ignored text and never reaches here.
+        """
+        remainder = _without(raw_text, classification.ignored_text)
+        if not remainder or not isinstance(content, TextContent):
+            return classification.intent, content
+
+        second = await classify(self.gateway, TextContent(text=remainder))
+        if second.intent == "other":
+            # The classifier stands by conversation once the aside is removed. Nothing
+            # to log; the reply still has to survive the claim guard.
+            return classification.intent, content
+
+        return second.intent, TextContent(text=remainder)
+
     # -- open-draft dispatch ------------------------------------------------
+
+    def _clarification_message(self, clarification, *, attempt: int = 0) -> OutgoingMessage:
+        """The one place a clarification is turned into a message.
+
+        Counting, varied wording and the visible way out all attach here. They used to
+        be spread over three call sites that built the message themselves, which is
+        part of why "ask again" drifted from "ask again differently" (design.md - One
+        place assembles a clarification message).
+        """
+        text = clarification.question_text
+        if attempt > 0:
+            text = f"{_reask_prefix(attempt)} {text}"
+        return OutgoingMessage(
+            text=text,
+            buttons=[*clarification.options, ABANDON_OPTION],
+        )
+
+    async def _give_up_on_draft(self, draft, item) -> list[OutgoingMessage]:
+        """Stop asking, discard, store nothing, and name what was dropped.
+
+        Naming it matters: after several exchanges about one portion, "non ho
+        registrato niente" without saying *what* leaves the user unsure whether an
+        earlier entry vanished too.
+        """
+        described = item.get("description") or item.get("activity_description") or "la voce"
+        await drafts.discard_draft(self.session, self.user.id)
+        return [
+            OutgoingMessage(
+                text=(
+                    f"Lasciamo perdere: non ho registrato {described}, perché non sono "
+                    "riuscito a capire la quantità. Se vuoi, riscrivimelo con la "
+                    'quantità, per esempio "150g di riso".'
+                )
+            )
+        ]
 
     async def _handle_with_open_draft(
         self, draft, content: MessageContent, raw_text: str
@@ -129,6 +242,12 @@ class MessagePipeline:
         planner = food_planner if draft.intent == DraftIntent.food else activity_planner
         field = draft.awaiting_field
         item = drafts.current_item(draft)
+
+        # Checked before the answer is parsed, so it can never be read as a quantity.
+        if raw_text.strip() == ABANDON_OPTION:
+            await drafts.discard_draft(self.session, self.user.id)
+            return [OutgoingMessage(text="Va bene, non ho registrato niente.")]
+
         resolved_before = dict(item.get("resolved", {}))
         updated_item = planner.apply_answer(item, field, raw_text)
         resolved_after = updated_item.get("resolved", {})
@@ -144,14 +263,14 @@ class MessagePipeline:
                     text="Ho annullato la richiesta precedente per gestire questo nuovo messaggio."
                 )
                 return [notice, *await self._handle_fresh(content, raw_text)]
-            clarification = await planner.check_item(self.session, item)
-            return [
-                OutgoingMessage(
-                    text=f"Non ho capito. {clarification.question_text}",
-                    buttons=clarification.options,
-                )
-            ]
+            attempt = await drafts.record_failed_attempt(self.session, draft)
+            if attempt >= self.settings.clarification_attempt_limit:
+                return await self._give_up_on_draft(draft, item)
 
+            clarification = await planner.check_item(self.session, item)
+            return [self._clarification_message(clarification, attempt=attempt)]
+
+        await drafts.reset_attempts(self.session, draft)
         await drafts.replace_current_item(self.session, draft, updated_item)
         if draft.intent == DraftIntent.food:
             return await self._advance_food_draft(draft)
@@ -173,11 +292,7 @@ class MessagePipeline:
             await drafts.replace_current_item(self.session, draft, item)
             if clarification is not None:
                 await drafts.set_awaiting_field(self.session, draft, clarification.field)
-                messages.append(
-                    OutgoingMessage(
-                        text=clarification.question_text, buttons=clarification.options
-                    )
-                )
+                messages.append(self._clarification_message(clarification))
                 return messages
             finalized = await food_planner.finalize_item(
                 self.session, self.gateway, self.user.id, item, self.tz
@@ -227,11 +342,7 @@ class MessagePipeline:
             await drafts.replace_current_item(self.session, draft, item)
             if clarification is not None:
                 await drafts.set_awaiting_field(self.session, draft, clarification.field)
-                messages.append(
-                    OutgoingMessage(
-                        text=clarification.question_text, buttons=clarification.options
-                    )
-                )
+                messages.append(self._clarification_message(clarification))
                 return messages
             finalized = await activity_planner.finalize_item(
                 self.session, self.gateway, self.user.id, item, weight.kg

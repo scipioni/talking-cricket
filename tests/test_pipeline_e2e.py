@@ -1,167 +1,94 @@
-"""End-to-end pipeline tests with a stubbed LLM gateway (no live endpoint available
-in this environment - see openspec/changes/calobot-v1/tasks.md group 14). Exercises
-the real classify -> extract -> draft -> resolve -> store path through
-MessagePipeline, which is what the telegram handlers call in production."""
+"""End-to-end tests with a scripted language model (no live endpoint is needed to
+run the suite). Exercises the real classify -> extract -> draft -> resolve -> store
+path, driven through the transport double so that what a test does is what a user
+could do: buttons are tapped, not typed.
+
+Before the double existed, a button answer was fed back as free text - which happens
+to work only because the clarification loop also accepts free text, and left the
+answer-callback handler untested for food and activity.
+"""
 
 from __future__ import annotations
 
-import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from harness.state import create_onboarded_user, food_extraction
 
-from calobot.ingestion.pipeline import MessagePipeline
-from calobot.llm.content import TextContent
-from calobot.llm.gateway import LLMGateway
-from calobot.persistence.repository import create_user
 from calobot.persistence.seed import seed_all
-from calobot.profile.service import apply_onboarding_field
-from calobot.settings import Settings
 
 
-def _fake_response(payload: dict) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
-    )
-
-
-def _stub_gateway(responses: list[dict]) -> LLMGateway:
-    settings = Settings(telegram_bot_token="x")  # type: ignore[call-arg]
-    gateway = LLMGateway(settings)
-    gateway._client.chat.completions.create = AsyncMock(
-        side_effect=[_fake_response(r) for r in responses]
-    )
-    return gateway
-
-
-async def _full_user(db_session):
-    import datetime as dt
-
-    user = await create_user(db_session, telegram_user_id=42)
-    await apply_onboarding_field(db_session, user, "sesso", "maschio")
-    await apply_onboarding_field(db_session, user, "data_nascita", dt.date(1990, 1, 1))
-    await apply_onboarding_field(db_session, user, "altezza_cm", 178.0)
-    await apply_onboarding_field(db_session, user, "peso_attuale_kg", 90.0)
-    await apply_onboarding_field(db_session, user, "peso_obiettivo_kg", 80.0)
-    await apply_onboarding_field(db_session, user, "livello_attivita", "moderato")
-    await apply_onboarding_field(db_session, user, "ritmo", "moderato")
-    user.onboarding_complete = True
-    await db_session.flush()
-    return user
-
-
-async def test_food_with_explicit_grams_resolves_from_table(db_session):
+async def test_food_with_explicit_grams_resolves_from_table(db_session, client, llm):
     await seed_all(db_session)
-    user = await _full_user(db_session)
+    await create_onboarded_user(db_session, 42)
 
-    gateway = _stub_gateway(
-        [
-            {"intent": "food", "ignored_text": None},  # classify
-            {  # extract_food
-                "items": [
-                    {
-                        "description": "noci",
-                        "quantity_grams": 10,
-                        "quantity_count": None,
-                        "count_unit_hint": None,
-                        "household_measure": None,
-                        "preparation": None,
-                        "preparation_material_but_unstated": False,
-                    }
-                ],
-                "when_text": None,
-            },
-            {"selected_candidate_id": 1},  # table row selection -> should match Walnuts row
-        ]
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(description="noci", quantity_grams=10),
+        {"selected_candidate_id": 1},  # matches the seeded Walnuts row
     )
 
-    settings = Settings(telegram_bot_token="x")  # type: ignore[call-arg]
-    pipeline = MessagePipeline(db_session, gateway, settings, user)
-    messages = await pipeline.handle(TextContent(text="ho mangiato 10g di noci"), "ho mangiato 10g di noci")
+    sent = await client.say("ho mangiato 10g di noci")
 
-    assert len(messages) == 1
-    assert "noci" in messages[0].text
-    assert messages[0].entry_ref is not None
-    assert messages[0].entry_ref[0] == "food"
+    assert len(sent) == 1
+    assert "noci" in sent[0].text
+    assert "🗑 elimina" in sent[0].options  # entry controls attached, so it was stored
 
 
-async def test_food_with_vague_portion_asks_then_stores(db_session):
+async def test_food_with_vague_portion_asks_then_stores(db_session, client, llm):
     await seed_all(db_session)
-    user = await _full_user(db_session)
+    await create_onboarded_user(db_session, 42)
 
-    gateway = _stub_gateway(
-        [
-            {"intent": "food", "ignored_text": None},  # classify
-            {  # extract_food: vague portion
-                "items": [
-                    {
-                        "description": "pasta al pesto",
-                        "quantity_grams": None,
-                        "quantity_count": None,
-                        "count_unit_hint": None,
-                        "household_measure": "un piatto",
-                        "preparation": None,
-                        "preparation_material_but_unstated": False,
-                    }
-                ],
-                "when_text": None,
-            },
-        ]
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(
+            description="pasta al pesto", quantity_grams=None, household_measure="un piatto"
+        ),
     )
-    settings = Settings(telegram_bot_token="x")  # type: ignore[call-arg]
-    pipeline = MessagePipeline(db_session, gateway, settings, user)
 
-    messages = await pipeline.handle(
-        TextContent(text="un piatto di pasta al pesto"), "un piatto di pasta al pesto"
-    )
-    assert len(messages) == 1
-    assert messages[0].buttons  # asked for a portion with tappable options
+    sent = await client.say("un piatto di pasta al pesto")
 
-    # user answers with a button label
-    gateway._client.chat.completions.create = AsyncMock(
-        side_effect=[_fake_response({"selected_candidate_id": None})]  # no table match -> estimate
-        + [_fake_response({"kcal_per_100g": 200, "display_name_it": "pasta al pesto"})]
+    assert len(sent) == 1
+    assert sent[0].options  # asked for a portion with tappable options
+    offered = sent[0].labels
+
+    # The user taps the middle option, as a real client would.
+    llm.push(
+        {"selected_candidate_id": None},  # no table match -> estimate
+        {"kcal_per_100g": 200, "display_name_it": "pasta al pesto"},
     )
-    answer = messages[0].buttons[1]  # "medio (~120g)"
-    follow_up = await pipeline.handle(TextContent(text=answer), answer)
+    follow_up = await client.tap(offered[1])
+
     assert len(follow_up) == 1
-    assert follow_up[0].entry_ref is not None
     assert "stima" in follow_up[0].text
+    assert "🗑 elimina" in follow_up[0].options
 
 
-async def test_weight_message_end_to_end(db_session):
+async def test_weight_message_end_to_end(db_session, client, llm):
     await seed_all(db_session)
-    user = await _full_user(db_session)
+    await create_onboarded_user(db_session, 42, weight_kg=90.0)
 
-    gateway = _stub_gateway(
-        [
-            {"intent": "weight", "ignored_text": None},
-            {"value_text": "89.5", "when_text": None},
-            {"kg_absolute": 89.5, "delta_kg": None, "direction": None},
-        ]
+    llm.push(
+        {"intent": "weight", "ignored_text": None},
+        {"value_text": "89.5", "when_text": None},
+        {"kg_absolute": 89.5, "delta_kg": None, "direction": None},
     )
-    settings = Settings(telegram_bot_token="x")  # type: ignore[call-arg]
-    pipeline = MessagePipeline(db_session, gateway, settings, user)
 
-    # small, plausible change from the 90kg logged at onboarding -> stored directly
-    messages = await pipeline.handle(TextContent(text="oggi peso 89,5"), "oggi peso 89,5")
-    assert len(messages) == 1
-    assert "89.5" in messages[0].text
-    assert messages[0].entry_ref[0] == "weight"
+    # A small, plausible change from the 90 kg logged at onboarding is stored directly.
+    sent = await client.say("oggi peso 89,5")
+
+    assert len(sent) == 1
+    assert "89.5" in sent[0].text
+    assert "🗑 elimina" in sent[0].options
 
 
-async def test_report_message_end_to_end(db_session):
+async def test_report_message_end_to_end(db_session, client, llm):
     await seed_all(db_session)
-    user = await _full_user(db_session)
+    await create_onboarded_user(db_session, 42)
 
-    gateway = _stub_gateway(
-        [
-            {"intent": "report", "ignored_text": None},
-            {"period_text": None, "topic": "food"},
-        ]
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "food"},
     )
-    settings = Settings(telegram_bot_token="x")  # type: ignore[call-arg]
-    pipeline = MessagePipeline(db_session, gateway, settings, user)
 
-    messages = await pipeline.handle(TextContent(text="report di oggi"), "report di oggi")
-    assert len(messages) == 1
-    assert "dati" in messages[0].text.lower()  # no food logged -> "non ci sono dati"
+    sent = await client.say("report di oggi")
+
+    assert len(sent) == 1
+    assert "dati" in sent[0].text.lower()  # nothing logged -> "non ci sono dati"

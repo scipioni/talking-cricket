@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.activity.resolver import resolve_met
+from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import ActivityExtraction
 from calobot.llm.gateway import LLMGateway
 from calobot.persistence.candidates import retrieve_met_candidates
@@ -50,7 +51,10 @@ async def check_item(
 ) -> ClarificationNeeded | None:
     resolved = item.get("resolved", {})
 
-    if item.get("duration_minutes") is None and "duration_minutes" not in resolved:
+    # Same rule as food grams: a duration is an amount, not merely a value that is
+    # present, so a dictated zero goes back through the clarification loop rather
+    # than becoming a stored entry of no duration.
+    if not is_real_quantity(item.get("duration_minutes")) and "duration_minutes" not in resolved:
         return ClarificationNeeded(
             field="duration_minutes",
             question_text=f"Quanto è durata l'attività ({item['activity_description']})?",
@@ -77,7 +81,7 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
     resolved = dict(item.get("resolved", {}))
     if field == "duration_minutes":
         minutes = DURATION_OPTIONS_MIN.get(raw_answer) or _parse_minutes_free_text(raw_answer)
-        if minutes is not None:
+        if is_real_quantity(minutes):
             resolved["duration_minutes"] = minutes
     elif field == "intensity" and raw_answer.strip():
         resolved["intensity"] = raw_answer.strip()

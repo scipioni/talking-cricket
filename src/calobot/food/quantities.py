@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import FoodItemExtraction
 
 # Typical single-unit weight in grams for common countable foods. Deliberately
@@ -37,10 +38,10 @@ class ResolvedQuantity:
 
 
 def resolve_quantity(item: FoodItemExtraction) -> ResolvedQuantity | None:
-    if item.quantity_grams is not None:
+    if is_real_quantity(item.quantity_grams):
         return ResolvedQuantity(grams=item.quantity_grams, is_estimated_from_count=False)
 
-    if item.quantity_count is not None and item.count_unit_hint:
+    if is_real_quantity(item.quantity_count) and item.count_unit_hint:
         unit_weight = TYPICAL_UNIT_WEIGHTS_G.get(item.count_unit_hint.strip().lower())
         if unit_weight is not None:
             return ResolvedQuantity(

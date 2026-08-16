@@ -67,6 +67,12 @@ task typecheck    # or: uv run mypy src/
 task check        # all three
 ```
 
+`task test` never contacts the language model, and drives the real Telegram handlers
+through an in-process stand-in for the client, so taps, entry controls, replies and
+commands are covered rather than only text. Separately, `task simulate` runs an agent
+that plays an uncooperative user across simulated days against the real endpoint -
+slow and it costs compute, so it is opt-in. See [docs/e2e.md](docs/e2e.md).
+
 All configuration is environment-driven; see `.env.example` for the full list.
 Notably:
 
@@ -80,6 +86,9 @@ Notably:
   point); point it elsewhere for local development.
 - `CALOBOT_TIMEZONE_NAME` defaults to `Europe/Rome` and governs every day boundary
   (reports, "one weight per day", etc).
+- `CALOBOT_DRAFT_EXPIRY_MINUTES` and `CALOBOT_CLARIFICATION_ATTEMPT_LIMIT` bound an
+  open clarification: the first by time, the second by how many consecutive
+  unusable answers the bot accepts before dropping the draft and saying so.
 
 ### Adding migrations
 

@@ -1,64 +1,53 @@
-"""Regression test for a real bug reported from a live conversation: tapping an
-onboarding button (sesso/livello di attività/ritmo) never applied the answer to
-the profile, because on_answer_callback routed straight into the general message
+"""Regression tests for a real bug reported from a live conversation: tapping an
+onboarding button (sesso/livello di attività/ritmo) never applied the answer to the
+profile, because on_answer_callback routed straight into the general message
 pipeline regardless of onboarding state, which correctly-but-uselessly classified
-the bare button label (e.g. "maschio") as unrelated chat."""
+the bare button label (e.g. "maschio") as unrelated chat.
+
+Driven through the transport double: the tap carries the real action data through
+the real callback handler, and the identifier of the keyboard it came from is a real
+message identifier - neither of which a mocked bot could provide.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
-from aiogram.types import Chat
-from aiogram.types import User as TgUser
-
 from calobot.persistence.models import Sesso
-from calobot.persistence.repository import create_user, get_user_by_telegram_id
-from calobot.telegram.handlers import on_answer_callback
+from calobot.persistence.repository import get_user_by_telegram_id
 
 
-def _make_callback(data: str, telegram_user_id: int, chat_id: int):
-    chat = Chat(id=chat_id, type="private")
-    tg_user = TgUser(id=telegram_user_id, is_bot=False, first_name="Stefano")
-    message = AsyncMock()
-    message.chat = chat
-    callback = AsyncMock()
-    callback.data = data
-    callback.message = message
-    callback.from_user = tg_user
-    return callback
+async def _reload(db_session, telegram_user_id: int):
+    db_session.expire_all()
+    return await get_user_by_telegram_id(db_session, telegram_user_id)
 
 
-async def test_onboarding_button_answer_is_applied_to_profile(db_session, settings):
-    await create_user(db_session, telegram_user_id=555)
-    await db_session.commit()
+async def test_onboarding_button_answer_is_applied_to_profile(db_session, client):
+    await client.start()
+    assert "maschio" in client.last.options  # the sesso question, with its keyboard
 
-    bot = AsyncMock()
-    callback = _make_callback("ans:maschio", telegram_user_id=555, chat_id=555)
+    sent = await client.tap("maschio")
 
-    await on_answer_callback(callback, bot, settings)
-
-    reloaded = await get_user_by_telegram_id(db_session, 555)
-    assert reloaded.sesso == Sesso.maschio
+    user = await _reload(db_session, client.telegram_user_id)
+    assert user.sesso == Sesso.maschio
 
     # It must advance to the *next* onboarding question, not a generic chat reply.
-    bot.send_message.assert_awaited_once()
-    sent_text = bot.send_message.call_args.args[1]
-    assert "nato" in sent_text.lower() or "età" in sent_text.lower()
+    assert len(sent) == 1
+    assert "nato" in sent[0].text.lower() or "età" in sent[0].text.lower()
 
 
-async def test_stale_button_tap_does_not_corrupt_a_later_field(db_session, settings):
-    """If the user taps an old keyboard from an already-answered question (e.g.
-    sesso), the tapped label must not be forced onto whatever field onboarding has
-    since moved on to."""
-    user = await create_user(db_session, telegram_user_id=556)
-    user.sesso = Sesso.maschio
-    await db_session.commit()
+async def test_stale_button_tap_does_not_corrupt_a_later_field(db_session, client):
+    """Tapping an old keyboard from an already-answered question must not force the
+    tapped label onto whatever field onboarding has since moved on to."""
+    await client.start()
+    sesso_question = client.last
 
-    bot = AsyncMock()
-    callback = _make_callback("ans:maschio", telegram_user_id=556, chat_id=556)
+    await client.tap("maschio")  # onboarding advances to date of birth
 
-    await on_answer_callback(callback, bot, settings)
+    sent = await client.tap("maschio", on=sesso_question)
 
-    reloaded = await get_user_by_telegram_id(db_session, 556)
-    assert reloaded.data_nascita is None  # untouched, not corrupted by the stale tap
-    bot.send_message.assert_awaited_once()
+    user = await _reload(db_session, client.telegram_user_id)
+    assert user.sesso == Sesso.maschio
+    assert user.data_nascita is None  # untouched, not corrupted by the stale tap
+
+    # The user is simply shown the step they are actually on.
+    assert len(sent) == 1
+    assert "nato" in sent[0].text.lower() or "età" in sent[0].text.lower()

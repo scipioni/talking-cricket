@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from calobot.persistence.models import LivelloAttivita, Ritmo, Sesso
+from calobot.persistence.timeutil import today_local
 
 ACTIVITY_FACTORS: dict[LivelloAttivita, float] = {
     LivelloAttivita.sedentario: 1.2,
@@ -81,7 +82,7 @@ def compute_budget(
     ritmo: Ritmo,
     on_date: dt.date | None = None,
 ) -> BudgetResult:
-    on_date = on_date or dt.date.today()
+    on_date = on_date or today_local()
     age = age_years(data_nascita, on_date)
     bmr = compute_bmr(sesso, current_weight_kg, height_cm, age)
     tdee = bmr * ACTIVITY_FACTORS[activity_level]

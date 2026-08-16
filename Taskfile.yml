@@ -72,6 +72,19 @@ tasks:
     cmds:
       - uv run pytest {{.CLI_ARGS}}
 
+  simulate:
+    desc: "Run the live simulation against the real endpoint (slow, costs compute)"
+    deps: [setup]
+    dotenv: [".env"]
+    cmds:
+      - uv run pytest -m live -s {{.CLI_ARGS}}
+
+  simulate:report:
+    desc: "Render the saved simulation report(s) for reading"
+    deps: [setup]
+    cmds:
+      - uv run python scripts/show_run.py {{.CLI_ARGS}}
+
   lint:
     desc: Lint with ruff
     deps: [setup]

@@ -20,13 +20,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# The column defaults below stamp every stored row, so they must read the same clock
+# as the rest of the system. This module used to define its own copy of utcnow(),
+# which meant a simulated clock moved day-boundary logic without moving the
+# timestamps those boundaries are applied to.
+from calobot.persistence.timeutil import utcnow
+
 
 class Base(DeclarativeBase):
     pass
-
-
-def utcnow() -> dt.datetime:
-    return dt.datetime.now(dt.UTC)
 
 
 class Sesso(enum.StrEnum):

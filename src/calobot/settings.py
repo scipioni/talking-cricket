@@ -46,6 +46,17 @@ class Settings(BaseSettings):
 
     draft_expiry_minutes: int = 30
 
+    # How many consecutive unusable answers to the same question before the system
+    # stops asking, discards the draft and says so (specs/message-ingestion - Draft
+    # completeness and the clarification loop). Before this existed the only exit was
+    # draft expiry, which the user cannot see, predict or be told about.
+    #
+    # Must not exceed the simulation harness's progress bound: if the bot were allowed
+    # more attempts than the harness tolerates, correct give-up behaviour would fail
+    # every simulation run. See tests/test_clarification_give_up.py, which pins the
+    # relationship so neither value can be changed alone.
+    clarification_attempt_limit: int = 3
+
     log_level: str = "INFO"
 
     web_port: int = 8080

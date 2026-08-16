@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.food.quantities import PORTION_OPTIONS_G, resolve_quantity
 from calobot.food.resolver import resolve_food_energy
+from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.gateway import LLMGateway
 from calobot.persistence.models import FoodEntry, Provenance
@@ -93,7 +94,10 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
         grams = PORTION_OPTIONS_G.get(raw_answer)
         if grams is None:
             grams = _parse_grams_free_text(raw_answer)
-        if grams is not None:
+        # A user can type "0 grammi" as easily as the model can extract it, so the
+        # answer path applies the same rule: an unreal amount leaves the field
+        # unresolved and check_item asks again.
+        if is_real_quantity(grams):
             resolved["portion_grams"] = grams
             resolved["quantity_is_estimated_from_count"] = False
     elif field == "preparation" and raw_answer.strip():

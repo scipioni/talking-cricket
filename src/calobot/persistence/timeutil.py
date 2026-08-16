@@ -1,15 +1,60 @@
-"""Day-boundary helpers. Timestamps are stored in UTC; day boundaries are computed by
-converting to a timezone passed as a parameter, never a hardcoded constant, so a later
-per-user timezone only needs a different argument here (design.md - Timezone)."""
+"""Day-boundary helpers, and the single seam through which the system reads the
+current instant.
+
+Timestamps are stored in UTC; day boundaries are computed by converting to a
+timezone passed as a parameter, never a hardcoded constant, so a later per-user
+timezone only needs a different argument here (design.md - Timezone).
+
+Every read of "now" in this codebase goes through `utcnow()` (or `today_local()`,
+which is derived from it), and `utcnow()` reads a provider that can be replaced.
+This is what lets a simulated conversation span days without touching the system
+clock (openspec/changes/calobot-simulation-harness/specs/conversation-simulation -
+Simulated time). Patching per-module was rejected: `utcnow` is imported by name in
+several places, so the patch set is a list that silently rots as modules are added,
+and a missed one produces code that half-travels in time.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from zoneinfo import ZoneInfo
 
 
-def utcnow() -> dt.datetime:
+def _system_clock() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
+
+
+_now_provider: Callable[[], dt.datetime] = _system_clock
+
+
+def set_clock(provider: Callable[[], dt.datetime]) -> None:
+    """Replace the source of the current instant. Intended for simulated runs and
+    tests; production never calls it."""
+    global _now_provider
+    _now_provider = provider
+
+
+def reset_clock() -> None:
+    global _now_provider
+    _now_provider = _system_clock
+
+
+def utcnow() -> dt.datetime:
+    # Deliberately an indirection rather than a rebindable name: SQLAlchemy column
+    # defaults capture this function object at class-definition time, so the
+    # provider has to be read per call for those to follow the clock too.
+    return _now_provider()
+
+
+def today_local() -> dt.date:
+    """The system-local calendar date, as `date.today()` returns it.
+
+    Kept local rather than converted to a configured timezone, because that would be
+    a behaviour change; routed through the clock so that simulated time reaches the
+    call sites that use it.
+    """
+    return utcnow().astimezone().date()
 
 
 def day_in_timezone(moment: dt.datetime, tz: ZoneInfo) -> dt.date:

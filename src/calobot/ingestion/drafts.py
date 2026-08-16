@@ -72,8 +72,42 @@ async def set_awaiting_field(session: AsyncSession, draft: PendingDraft, field: 
     await session.flush()
 
 
+# -- clarification attempts -------------------------------------------------
+#
+# How many times in a row the user has answered the current question with something
+# unusable. Kept in the JSON payload rather than in a column of its own: it is
+# per-draft state of interest to nobody once the draft closes, it is never queried
+# across rows, and living here means it inherits the persistence the draft already
+# has - a stalled conversation survives a restart with its count intact, and no
+# Alembic revision is needed (design.md - The counter lives in the draft payload).
+
+
+def attempts(draft: PendingDraft) -> int:
+    """A draft written before this existed has no key, which reads as zero - so
+    drafts in flight across a deploy simply start counting."""
+    return int(draft.payload.get("attempts", 0))
+
+
+async def record_failed_attempt(session: AsyncSession, draft: PendingDraft) -> int:
+    draft.payload = {**draft.payload, "attempts": attempts(draft) + 1}
+    await session.flush()
+    return attempts(draft)
+
+
+async def reset_attempts(session: AsyncSession, draft: PendingDraft) -> None:
+    """Called whenever the draft advances - the field was resolved, or the draft moved
+    on to another item. The bound is on consecutive failures for one question, not on
+    the conversation as a whole."""
+    if "attempts" not in draft.payload:
+        return
+    payload = {k: v for k, v in draft.payload.items() if k != "attempts"}
+    draft.payload = payload
+    await session.flush()
+
+
 async def advance_to_next_item(session: AsyncSession, draft: PendingDraft) -> None:
-    draft.payload = {**draft.payload, "current_index": draft.payload["current_index"] + 1}
+    payload = {k: v for k, v in draft.payload.items() if k != "attempts"}
+    draft.payload = {**payload, "current_index": draft.payload["current_index"] + 1}
     draft.awaiting_field = None
     await session.flush()
 

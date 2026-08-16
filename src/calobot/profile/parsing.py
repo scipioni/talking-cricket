@@ -8,6 +8,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+from calobot.persistence.timeutil import today_local
+
 
 def parse_sesso(text: str) -> str | None:
     text = text.strip().lower()
@@ -36,7 +38,7 @@ def parse_weight_kg(text: str) -> float | None:
 
 
 def parse_data_nascita(text: str, today: dt.date | None = None) -> dt.date | None:
-    today = today or dt.date.today()
+    today = today or today_local()
     text = text.strip().lower()
 
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"):

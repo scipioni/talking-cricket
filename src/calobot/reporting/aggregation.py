@@ -13,7 +13,7 @@ from calobot.persistence.repository import (
     get_entries_in_range,
     get_weight_entries_in_range,
 )
-from calobot.persistence.timeutil import period_bounds_utc
+from calobot.persistence.timeutil import period_bounds_utc, today_local
 from calobot.reporting.periods import Period
 
 MIN_MEASUREMENTS_FOR_TREND = 3
@@ -85,7 +85,7 @@ async def build_food_report(
     start_day = start.astimezone(tz).date()
     end_day = end.astimezone(tz).date()
     all_days = _all_days_in_range(start_day, end_day)
-    days_with_no_data = [d for d in all_days if d not in days_with_data and d <= dt.date.today()]
+    days_with_no_data = [d for d in all_days if d not in days_with_data and d <= today_local()]
 
     num_days_counted = max(len(days_with_data), 1)
     average = total / num_days_counted
