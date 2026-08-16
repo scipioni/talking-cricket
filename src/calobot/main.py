@@ -45,8 +45,36 @@ async def _async_main(settings: Settings) -> None:
     dispatcher.update.outer_middleware(IncomingLoggingMiddleware())
     dispatcher.include_router(router)
 
-    logger.info("starting long polling")
-    await dispatcher.start_polling(bot, settings=settings)
+    # Start the background in-memory telemetry history collector
+    from calobot.telemetry.history import telemetry_history
+
+    telemetry_history.start_listening()
+
+    # Create and configure uvicorn server for the telemetry APIs and Dashboard
+    import uvicorn
+
+    from calobot.telemetry.server import app as telemetry_app
+
+    config = uvicorn.Config(
+        telemetry_app,
+        host="0.0.0.0",
+        port=settings.web_port,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+
+    logger.info(
+        "starting concurrent bot long polling and telemetry fastapi web server on port %d",
+        settings.web_port,
+    )
+
+    try:
+        await asyncio.gather(
+            dispatcher.start_polling(bot, settings=settings),
+            server.serve(),
+        )
+    finally:
+        telemetry_history.stop_listening()
 
 
 def run() -> None:

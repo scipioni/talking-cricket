@@ -9,6 +9,7 @@ every outbound API call: send_message, send_photo, answer_callback_query, ...).
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -18,6 +19,9 @@ from aiogram.client.session.middlewares.base import BaseRequestMiddleware, NextR
 from aiogram.methods import TelegramMethod
 from aiogram.methods.base import TelegramType
 from aiogram.types import TelegramObject, Update
+
+from calobot.telemetry.bus import event_bus
+from calobot.telemetry.context import bind_telemetry_context
 
 logger = logging.getLogger("calobot.telegram.messages")
 
@@ -31,6 +35,18 @@ def _truncate(text: str | None) -> str:
     return text if len(text) <= PREVIEW_LENGTH else text[:PREVIEW_LENGTH] + "…"
 
 
+def _extract_chat_id(update: Update) -> int | None:
+    if update.message is not None:
+        return update.message.chat.id
+    if update.callback_query is not None:
+        if update.callback_query.message is not None:
+            return update.callback_query.message.chat.id
+        return update.callback_query.from_user.id
+    if update.edited_message is not None:
+        return update.edited_message.chat.id
+    return None
+
+
 class IncomingLoggingMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -40,6 +56,32 @@ class IncomingLoggingMiddleware(BaseMiddleware):
     ) -> Any:
         if isinstance(event, Update):
             self._log_update(event)
+            chat_id = _extract_chat_id(event)
+            if chat_id is not None:
+                # Build telemetry event payload
+                payload: dict[str, Any] = {
+                    "type": "incoming_update",
+                    "chat_id": chat_id,
+                    "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                    "update_id": event.update_id,
+                }
+                if event.message is not None:
+                    payload["text"] = event.message.text or ""
+                    payload["has_image"] = bool(event.message.photo)
+                    payload["username"] = (
+                        event.message.from_user.username if event.message.from_user else None
+                    )
+                elif event.callback_query is not None:
+                    payload["callback_data"] = event.callback_query.data
+                    payload["username"] = (
+                        event.callback_query.from_user.username if event.callback_query.from_user else None
+                    )
+
+                event_bus.publish(payload)
+
+                with bind_telemetry_context(chat_id):
+                    return await handler(event, data)
+
         return await handler(event, data)
 
     @staticmethod
@@ -78,6 +120,46 @@ class OutgoingLoggingMiddleware(BaseRequestMiddleware):
         method: TelegramMethod[TelegramType],
     ) -> Any:
         self._log_request(method)
+
+        chat_id = getattr(method, "chat_id", None)
+        try:
+            if chat_id is not None:
+                chat_id = int(chat_id)
+        except (ValueError, TypeError):
+            pass
+
+        if chat_id is None:
+            from calobot.telemetry.context import active_chat_id
+
+            chat_id = active_chat_id.get(None)
+
+        if chat_id is not None:
+            options: dict[str, str] = {}
+            reply_markup = getattr(method, "reply_markup", None)
+            from aiogram.types import InlineKeyboardMarkup
+
+            if isinstance(reply_markup, InlineKeyboardMarkup):
+                options = {
+                    button.text: button.callback_data
+                    for row in reply_markup.inline_keyboard
+                    for button in row
+                    if button.callback_data is not None
+                }
+
+            text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+            api_method = getattr(method, "__api_method__", type(method).__name__)
+
+            payload: dict[str, Any] = {
+                "type": "outgoing_response",
+                "chat_id": chat_id,
+                "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                "method": api_method,
+                "text": text,
+                "options": options,
+                "has_image": "Photo" in api_method,
+            }
+            event_bus.publish(payload)
+
         return await make_request(bot, method)
 
     @staticmethod

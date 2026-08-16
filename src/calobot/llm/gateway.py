@@ -7,6 +7,7 @@ becomes one of the two typed errors in llm/errors.py rather than a raw exception
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 from typing import Any, TypeVar
@@ -66,6 +67,21 @@ class LLMGateway:
         temperature = self._settings.temperature_for_step(step)
         retry_limit = self._settings.llm_retry_limit
 
+        from calobot.telemetry.bus import event_bus
+        from calobot.telemetry.context import active_chat_id, active_session_id
+
+        chat_id = active_chat_id.get(None)
+        session_id = active_session_id.get(None)
+
+        prompt_text = ""
+        if isinstance(content, TextContent):
+            prompt_text = content.text
+        elif isinstance(content, ImageContent):
+            prompt_text = f"[Image Content] Caption: {content.caption or 'None'}"
+
+        start_time = dt.datetime.now(dt.UTC)
+        validation_attempts: list[dict[str, Any]] = []
+
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _content_to_openai_parts(content)},
@@ -89,15 +105,76 @@ class LLMGateway:
                 )
             except (openai.APIConnectionError, openai.APITimeoutError) as exc:
                 logger.warning("llm endpoint unreachable/timed out on step=%s: %s", step, exc)
+                if chat_id is not None:
+                    event_bus.publish(
+                        {
+                            "type": "llm_transaction",
+                            "chat_id": chat_id,
+                            "session_id": session_id,
+                            "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                            "step": step,
+                            "model": model,
+                            "temperature": temperature,
+                            "system_prompt": system_prompt,
+                            "prompt": prompt_text,
+                            "schema_name": schema.__name__,
+                            "attempts_count": attempt + 1,
+                            "success": False,
+                            "error": f"LLM Connection/Timeout Error: {exc}",
+                        }
+                    )
                 raise LLMUnavailableError(step) from exc
             except openai.APIStatusError as exc:
                 logger.warning("llm endpoint error on step=%s: %s", step, exc)
+                if chat_id is not None:
+                    event_bus.publish(
+                        {
+                            "type": "llm_transaction",
+                            "chat_id": chat_id,
+                            "session_id": session_id,
+                            "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                            "step": step,
+                            "model": model,
+                            "temperature": temperature,
+                            "system_prompt": system_prompt,
+                            "prompt": prompt_text,
+                            "schema_name": schema.__name__,
+                            "attempts_count": attempt + 1,
+                            "success": False,
+                            "error": f"LLM API Status Error ({exc.status_code}): {exc.message}",
+                        }
+                    )
                 raise LLMUnavailableError(step) from exc
 
             raw = response.choices[0].message.content or ""
             try:
                 parsed = json.loads(raw)
-                return schema.model_validate(parsed)
+                validated = schema.model_validate(parsed)
+
+                if chat_id is not None:
+                    latency = (dt.datetime.now(dt.UTC) - start_time).total_seconds()
+                    event_bus.publish(
+                        {
+                            "type": "llm_transaction",
+                            "chat_id": chat_id,
+                            "session_id": session_id,
+                            "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                            "step": step,
+                            "model": model,
+                            "temperature": temperature,
+                            "system_prompt": system_prompt,
+                            "prompt": prompt_text,
+                            "schema_name": schema.__name__,
+                            "schema_json": schema.model_json_schema(),
+                            "response_raw": raw,
+                            "response_parsed": parsed,
+                            "attempts_count": attempt + 1,
+                            "validation_attempts": validation_attempts,
+                            "latency_seconds": latency,
+                            "success": True,
+                        }
+                    )
+                return validated
             except (json.JSONDecodeError, ValidationError) as exc:
                 last_error = exc
                 logger.info(
@@ -105,6 +182,13 @@ class LLMGateway:
                     step,
                     attempt,
                     exc,
+                )
+                validation_attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "raw_response": raw,
+                        "error": str(exc),
+                    }
                 )
                 messages.append({"role": "assistant", "content": raw})
                 messages.append(
@@ -118,4 +202,26 @@ class LLMGateway:
                 )
                 continue
 
+        if chat_id is not None:
+            latency = (dt.datetime.now(dt.UTC) - start_time).total_seconds()
+            event_bus.publish(
+                {
+                    "type": "llm_transaction",
+                    "chat_id": chat_id,
+                    "session_id": session_id,
+                    "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                    "step": step,
+                    "model": model,
+                    "temperature": temperature,
+                    "system_prompt": system_prompt,
+                    "prompt": prompt_text,
+                    "schema_name": schema.__name__,
+                    "schema_json": schema.model_json_schema(),
+                    "attempts_count": retry_limit + 1,
+                    "validation_attempts": validation_attempts,
+                    "latency_seconds": latency,
+                    "success": False,
+                    "error": f"Validation limit exhausted: {last_error}",
+                }
+            )
         raise LLMValidationExhaustedError(step) from last_error

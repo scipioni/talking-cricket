@@ -48,6 +48,8 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    web_port: int = 8080
+
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)
