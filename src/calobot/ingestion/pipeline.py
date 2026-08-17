@@ -30,8 +30,8 @@ from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.content import ImageContent, MessageContent, TextContent
 from calobot.llm.gateway import LLMGateway
 from calobot.persistence.models import DraftIntent, FoodEntry, Provenance, User
-from calobot.persistence.repository import get_last_entry, get_latest_weight
-from calobot.persistence.timeutil import today_in_timezone
+from calobot.persistence.repository import get_entries_in_range, get_last_entry, get_latest_weight
+from calobot.persistence.timeutil import period_bounds_utc, today_in_timezone
 from calobot.photo.barcode import decode_barcode
 from calobot.photo.classifier import classify_photo
 from calobot.photo.dish import extract_dish, to_food_extraction
@@ -45,6 +45,7 @@ from calobot.reporting.aggregation import (
     build_weight_report,
 )
 from calobot.reporting.charts import render_calorie_chart, render_weight_chart
+from calobot.reporting.dietician import build_dietitian_review, format_dietician_review
 from calobot.reporting.periods import parse_period
 from calobot.safety.conversation import handle_other
 from calobot.settings import Settings
@@ -709,6 +710,14 @@ class MessagePipeline:
                         self.session, self.user.id, period, reference_day, self.tz
                     )
                     photo = render_calorie_chart(breakdown, budget_kcal)
+
+                    # Add dietician review for weekly/monthly food reports
+                    start, end = period_bounds_utc(period, reference_day, self.tz)
+                    entries = await get_entries_in_range(self.session, "food", self.user.id, start, end)
+                    review = await build_dietitian_review(self.gateway, entries, self.tz)
+                    if review:
+                        text += format_dietician_review(review)
+
                 messages.append(OutgoingMessage(text=text, photo_png=photo))
 
         if extraction.topic in ("weight", "all"):
