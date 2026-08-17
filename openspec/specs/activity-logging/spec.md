@@ -70,3 +70,8 @@ The system SHALL record activity entries against the moment of the activity in t
 
 - **WHEN** a user writes "ieri ho corso 40 minuti"
 - **THEN** the entry is recorded against the previous day
+
+#### Scenario: Explicit time stated
+
+- **WHEN** a user writes "ho corso 40 minuti alle 7 di ieri"
+- **THEN** the entry is recorded at 07:00 Europe/Rome on the previous day

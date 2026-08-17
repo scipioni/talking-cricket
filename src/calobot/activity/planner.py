@@ -18,7 +18,7 @@ from calobot.ingestion.schemas import ActivityExtraction
 from calobot.llm.gateway import LLMGateway
 from calobot.persistence.candidates import retrieve_met_candidates
 from calobot.persistence.models import ActivityEntry, Provenance
-from calobot.persistence.timeutil import utcnow
+from calobot.persistence.timeutil import resolve_when_text, utcnow
 
 DURATION_OPTIONS_MIN = {"15 min": 15, "30 min": 30, "45 min": 45, "60 min": 60}
 
@@ -95,11 +95,11 @@ def _parse_minutes_free_text(text: str) -> float | None:
     return float(match.group(1).replace(",", "."))
 
 
-def resolve_when(when_text: str | None, now: dt.datetime | None = None) -> dt.datetime:
+def resolve_when(when_text: str | None, tz, now: dt.datetime | None = None) -> dt.datetime:
+    """'ieri' shifts the calendar day (in `tz`); an explicit clock time in when_text
+    (e.g. 'alle 15') overrides the time-of-day."""
     now = now or utcnow()
-    if when_text and "ieri" in when_text.lower():
-        return now - dt.timedelta(days=1)
-    return now
+    return resolve_when_text(when_text, tz, now)
 
 
 async def finalize_item(
@@ -108,6 +108,7 @@ async def finalize_item(
     user_id: int,
     item: dict[str, Any],
     current_weight_kg: float,
+    tz,
 ) -> FinalizedActivity:
     resolved = item["resolved"]
     duration_minutes = item.get("duration_minutes") or resolved["duration_minutes"]
@@ -123,7 +124,7 @@ async def finalize_item(
         met=met_result.met,
         kcal=kcal,
         provenance=met_result.provenance,
-        performed_at=resolve_when(item.get("when_text")),
+        performed_at=resolve_when(item.get("when_text"), tz),
     )
     session.add(entry)
     await session.flush()

@@ -17,8 +17,12 @@ and a missed one produces code that half-travels in time.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections.abc import Callable
 from zoneinfo import ZoneInfo
+
+# Matches an explicit clock time such as "alle 15", "alle le 15:30", "ore 9.05".
+_EXPLICIT_TIME_RE = re.compile(r"(?:alle\s+(?:le\s+)?|ore\s+)(\d{1,2})(?:[:.,](\d{2}))?")
 
 
 def _system_clock() -> dt.datetime:
@@ -77,6 +81,37 @@ def day_bounds_utc(day: dt.date, tz: ZoneInfo) -> tuple[dt.datetime, dt.datetime
     start = start_of_day_utc(day, tz)
     end = start_of_day_utc(day + dt.timedelta(days=1), tz)
     return start, end
+
+
+def _parse_explicit_time(when_text: str) -> dt.time | None:
+    match = _EXPLICIT_TIME_RE.search(when_text.lower())
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return dt.time(hour, minute)
+
+
+def resolve_when_text(when_text: str | None, tz: ZoneInfo, now: dt.datetime) -> dt.datetime:
+    """Resolves a free-text temporal phrase (as extracted into `when_text`) against
+    `now`, honouring an explicit day ('ieri') and/or clock time ('alle 15') stated in
+    it. Day and time-of-day are resolved independently and both default to `now`'s
+    local day/time in `tz`, so "alle 15" alone shifts only the hour and "ieri" alone
+    shifts only the day.
+    """
+    if not when_text:
+        return now
+    local_now = now.astimezone(tz)
+    day_offset = -1 if "ieri" in when_text.lower() else 0
+    explicit_time = _parse_explicit_time(when_text)
+    if day_offset == 0 and explicit_time is None:
+        return now
+    target_date = local_now.date() + dt.timedelta(days=day_offset)
+    target_time = explicit_time or local_now.time()
+    local_dt = dt.datetime.combine(target_date, target_time, tzinfo=tz)
+    return local_dt.astimezone(dt.UTC)
 
 
 def period_bounds_utc(

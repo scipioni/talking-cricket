@@ -99,6 +99,11 @@ The system SHALL record food entries against the moment of consumption in the Eu
 - **WHEN** a user writes "ieri a cena ho mangiato una pizza"
 - **THEN** the entry is recorded against the previous day
 
+#### Scenario: Explicit time stated
+
+- **WHEN** a user writes "ho mangiato una mela alle 15 di ieri"
+- **THEN** the entry is recorded at 15:00 Europe/Rome on the previous day
+
 #### Scenario: No time stated
 
 - **WHEN** a user logs a food without stating when

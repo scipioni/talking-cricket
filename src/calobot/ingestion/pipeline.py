@@ -503,7 +503,7 @@ class MessagePipeline:
                 messages.append(self._clarification_message(clarification))
                 return messages
             finalized = await activity_planner.finalize_item(
-                self.session, self.gateway, self.user.id, item, weight.kg
+                self.session, self.gateway, self.user.id, item, weight.kg, self.tz
             )
             messages.append(self._activity_confirmation(finalized))
             await drafts.advance_to_next_item(self.session, draft)

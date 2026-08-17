@@ -16,7 +16,7 @@ from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.gateway import LLMGateway
 from calobot.persistence.models import FoodEntry, Provenance
-from calobot.persistence.timeutil import utcnow
+from calobot.persistence.timeutil import resolve_when_text, utcnow
 
 PREPARATION_OPTIONS = ["fritto", "bollito", "al forno", "alla griglia"]
 
@@ -116,13 +116,13 @@ def _parse_grams_free_text(text: str) -> float | None:
 
 
 def resolve_when(when_text: str | None, tz, now: dt.datetime | None = None) -> dt.datetime:
-    """Minimal deterministic resolution: 'ieri' -> yesterday, otherwise now. Anything
-    more nuanced ('ieri a cena') is expected to have been folded into when_text
-    by extraction; full natural-language date parsing is a fair place to extend this."""
+    """'ieri' shifts the calendar day (in `tz`, so day boundaries land on local
+    midnight); an explicit clock time in when_text (e.g. 'alle 15') overrides the
+    time-of-day. Anything more nuanced ('ieri a cena') is expected to have been
+    folded into when_text by extraction; full natural-language date parsing is a
+    fair place to extend this."""
     now = now or utcnow()
-    if when_text and "ieri" in when_text.lower():
-        return now - dt.timedelta(days=1)
-    return now
+    return resolve_when_text(when_text, tz, now)
 
 
 async def finalize_item(
