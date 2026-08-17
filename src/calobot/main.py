@@ -11,6 +11,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from calobot.logging_config import configure_logging
 from calobot.persistence.engine import get_session_factory, init_engine
@@ -40,6 +41,15 @@ async def _async_main(settings: Settings) -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     bot.session.middleware(OutgoingLoggingMiddleware())
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Avvia la registrazione o mostra il profilo"),
+            BotCommand(command="profilo", description="Mostra i tuoi dati e il budget calorico"),
+            BotCommand(command="annulla", description="Elimina l'ultima voce registrata"),
+            BotCommand(command="cancellami", description="Elimina definitivamente tutti i dati"),
+            BotCommand(command="help", description="Mostra i comandi disponibili"),
+        ]
+    )
 
     dispatcher = Dispatcher()
     dispatcher.update.outer_middleware(IncomingLoggingMiddleware())

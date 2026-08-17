@@ -83,6 +83,15 @@ def test_a_real_count_still_resolves():
     assert resolved is not None and resolved.grams == 360
 
 
+def test_a_count_of_small_countable_items_still_resolves():
+    """Regression test: "2 noci" (2 walnuts) used to fall through to the generic
+    80/120/180g portion-size clarification - sizes tuned for a whole fruit, not a
+    couple of walnuts - because "noce" was missing from TYPICAL_UNIT_WEIGHTS_G, even
+    though a real count was already given."""
+    resolved = resolve_quantity(_item(quantity_count=2, count_unit_hint="noce"))
+    assert resolved is not None and resolved.grams == 10
+
+
 # -- the clarification answer path ----------------------------------------
 
 

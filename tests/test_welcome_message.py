@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from calobot.profile.service import register_or_get_user
-from calobot.telegram.handlers import WELCOME_MESSAGE
+from calobot.telegram.handlers import _welcome_message
 
 
 def test_welcome_message_covers_required_content():
-    lowered = WELCOME_MESSAGE.lower()
+    lowered = _welcome_message("Grillo Parlante").lower()
     # purpose/capabilities
     assert "peso" in lowered
     assert "attività" in lowered

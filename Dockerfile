@@ -38,6 +38,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 3: Python runtime
 FROM python:3.12-slim AS runtime
 
+# libzbar0: the barcode decoder (pyzbar) binds to it via ctypes at runtime rather
+# than linking at build time, so it can't be resolved by `uv` alone and must be
+# installed as a system package here (openspec/changes/calobot-photo-input).
+RUN apt-get update && apt-get install -y --no-install-recommends libzbar0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Single-replica correctness constraint: see the "single-writer" comment in
 # stack.yml. This image assumes it is the only writer to /data.
 RUN groupadd --gid 1000 calobot && \

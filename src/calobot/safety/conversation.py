@@ -16,8 +16,9 @@ from calobot.safety.medical import REFUSAL_TEXT, is_medical_topic
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """\
-Sei Calobot, un bot italiano di tracciamento nutrizionale (non un consulente
+def _system_prompt(bot_label: str) -> str:
+    return f"""\
+Sei {bot_label}, un bot italiano di tracciamento nutrizionale (non un consulente
 medico). Rispondi in modo breve e cordiale in italiano. NON dare consigli
 medici, clinici, su farmaci, diagnosi o disturbi alimentari: se l'utente
 chiede questo, rispondi che non sei uno strumento medico e suggerisci di
@@ -37,13 +38,15 @@ UNFOUNDED_CLAIM_REPLACEMENT = (
 )
 
 
-async def handle_other(gateway: LLMGateway, text: str, content: MessageContent) -> str:
+async def handle_other(
+    gateway: LLMGateway, text: str, content: MessageContent, bot_label: str
+) -> str:
     if is_medical_topic(text):
         return REFUSAL_TEXT
 
     result = await gateway.call_structured(
         step="extract",
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=_system_prompt(bot_label),
         content=content,
         schema=ConversationalReply,
     )

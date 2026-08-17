@@ -67,16 +67,66 @@ attività abituale, ritmo desiderato per raggiungere l'obiettivo. Lascia null i
 campi non menzionati nel messaggio.
 """
 
+FIELD_TEXT_ATTR: dict[str, str] = {
+    "sesso": "sesso_text",
+    "data_nascita": "data_nascita_text",
+    "altezza_cm": "altezza_text",
+    "peso_attuale_kg": "peso_attuale_text",
+    "peso_obiettivo_kg": "peso_obiettivo_text",
+    "livello_attivita": "livello_attivita_text",
+    "ritmo": "ritmo_text",
+}
+
+FIELD_PARSERS: dict[str, Any] = {
+    "sesso": parsing.parse_sesso,
+    "data_nascita": parsing.parse_data_nascita,
+    "altezza_cm": parsing.parse_height_cm,
+    "peso_attuale_kg": parsing.parse_weight_kg,
+    "peso_obiettivo_kg": parsing.parse_weight_kg,
+    "livello_attivita": parsing.parse_livello_attivita,
+    "ritmo": parsing.parse_ritmo,
+}
+
+FIELD_RANGES: dict[str, tuple[float, float]] = {
+    "altezza_cm": (100, 250),
+    "peso_attuale_kg": (30, 400),
+    "peso_obiettivo_kg": (30, 400),
+}
+
+
+def _prompt_for(expected_field: str | None) -> str:
+    if expected_field is None:
+        return ONBOARDING_PROMPT
+    return (
+        ONBOARDING_PROMPT
+        + f'\nIn particolare, è appena stata posta questa domanda: '
+        f'"{QUESTIONS[expected_field]}". Se il messaggio è una risposta diretta a '
+        f"questa domanda ma non menziona esplicitamente un'unità o un campo (es. un "
+        f"numero nudo), attribuiscilo comunque al campo atteso ({expected_field})."
+    )
+
 
 async def extract_onboarding_fields(
-    gateway: LLMGateway, content: MessageContent
+    gateway: LLMGateway, content: MessageContent, expected_field: str | None = None
 ) -> OnboardingExtraction:
     return await gateway.call_structured(
         step="extract",
-        system_prompt=ONBOARDING_PROMPT,
+        system_prompt=_prompt_for(expected_field),
         content=content,
         schema=OnboardingExtraction,
     )
+
+
+def parse_field_raw(field: str, text: str) -> tuple[Any | None, str | None]:
+    """Deterministically parses raw text for a single onboarding field. Returns
+    (value, error_message); value is None if unparseable or out of range."""
+    value = FIELD_PARSERS[field](text)
+    if value is None:
+        return None, None
+    range_ = FIELD_RANGES.get(field)
+    if range_ is not None and not (range_[0] <= value <= range_[1]):
+        return None, RANGE_ERRORS[field]
+    return value, None
 
 
 def parse_and_validate(extraction: OnboardingExtraction) -> tuple[dict[str, Any], list[str]]:
@@ -85,49 +135,15 @@ def parse_and_validate(extraction: OnboardingExtraction) -> tuple[dict[str, Any]
     parsed: dict[str, Any] = {}
     errors: list[str] = []
 
-    if extraction.sesso_text:
-        sesso = parsing.parse_sesso(extraction.sesso_text)
-        if sesso:
-            parsed["sesso"] = sesso
-
-    if extraction.data_nascita_text:
-        data_nascita = parsing.parse_data_nascita(extraction.data_nascita_text)
-        if data_nascita:
-            parsed["data_nascita"] = data_nascita
-
-    if extraction.altezza_text:
-        altezza = parsing.parse_height_cm(extraction.altezza_text)
-        if altezza is not None:
-            if 100 <= altezza <= 250:
-                parsed["altezza_cm"] = altezza
-            else:
-                errors.append(RANGE_ERRORS["altezza_cm"])
-
-    if extraction.peso_attuale_text:
-        peso_attuale = parsing.parse_weight_kg(extraction.peso_attuale_text)
-        if peso_attuale is not None:
-            if 30 <= peso_attuale <= 400:
-                parsed["peso_attuale_kg"] = peso_attuale
-            else:
-                errors.append(RANGE_ERRORS["peso_attuale_kg"])
-
-    if extraction.peso_obiettivo_text:
-        peso_obiettivo = parsing.parse_weight_kg(extraction.peso_obiettivo_text)
-        if peso_obiettivo is not None:
-            if 30 <= peso_obiettivo <= 400:
-                parsed["peso_obiettivo_kg"] = peso_obiettivo
-            else:
-                errors.append(RANGE_ERRORS["peso_obiettivo_kg"])
-
-    if extraction.livello_attivita_text:
-        livello = parsing.parse_livello_attivita(extraction.livello_attivita_text)
-        if livello:
-            parsed["livello_attivita"] = livello
-
-    if extraction.ritmo_text:
-        ritmo = parsing.parse_ritmo(extraction.ritmo_text)
-        if ritmo:
-            parsed["ritmo"] = ritmo
+    for field in ONBOARDING_FIELDS:
+        text = getattr(extraction, FIELD_TEXT_ATTR[field])
+        if not text:
+            continue
+        value, error = parse_field_raw(field, text)
+        if error:
+            errors.append(error)
+        elif value is not None:
+            parsed[field] = value
 
     return parsed, errors
 

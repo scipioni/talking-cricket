@@ -8,6 +8,7 @@ loop for the 'new message while a draft is open' policy implemented here.
 
 from __future__ import annotations
 
+import base64
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from calobot.activity import planner as activity_planner
 from calobot.corrections.service import amend_food_quantity
 from calobot.food import planner as food_planner
-from calobot.food.resolver import resolve_food_energy
+from calobot.food.resolver import normalize_description, resolve_food_energy, write_resolution
 from calobot.ingestion import drafts
 from calobot.ingestion.classifier import classify
 from calobot.ingestion.extractors import (
@@ -25,11 +26,17 @@ from calobot.ingestion.extractors import (
     extract_weight,
 )
 from calobot.ingestion.responses import OutgoingMessage
+from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.content import ImageContent, MessageContent, TextContent
 from calobot.llm.gateway import LLMGateway
-from calobot.persistence.models import DraftIntent, FoodEntry, User
+from calobot.persistence.models import DraftIntent, FoodEntry, Provenance, User
 from calobot.persistence.repository import get_last_entry, get_latest_weight
 from calobot.persistence.timeutil import today_in_timezone
+from calobot.photo.barcode import decode_barcode
+from calobot.photo.classifier import classify_photo
+from calobot.photo.dish import extract_dish, to_food_extraction
+from calobot.photo.label import LabelUnreadable, resolve_from_label
+from calobot.photo.openfoodfacts import ATTRIBUTION, LookupUnavailable, lookup_product
 from calobot.profile.service import current_budget
 from calobot.reporting.aggregation import (
     build_activity_report,
@@ -43,6 +50,11 @@ from calobot.safety.conversation import handle_other
 from calobot.settings import Settings
 from calobot.weight.normalizer import normalize_weight_text
 from calobot.weight.service import NeedsConfirmation, Rejected, Stored, apply_weight
+
+PHOTO_NOTICE = (
+    "Le foto vengono elaborate e non conservate: uso l'immagine solo per "
+    "interpretarla, poi la scarto.\n\n"
+)
 
 LOGGABLE_INTENTS = {"food", "weight", "activity", "report", "correction"}
 
@@ -84,6 +96,14 @@ def _reask_prefix(attempt: int) -> str:
     return _REASK_PREFIXES[min(attempt, len(_REASK_PREFIXES)) - 1]
 
 
+def _single_food_extraction(description: str) -> FoodExtraction:
+    """A one-food extraction with no quantity, in the same shape a typed message
+    produces - used by the label and barcode photo paths so they feed the ordinary
+    food draft/clarification loop unchanged (design.md - Photo-derived entries are
+    ordinary entries)."""
+    return FoodExtraction(items=[FoodItemExtraction(description=description)], when_text=None)
+
+
 def _without(text: str, aside: str | None) -> str:
     """The message with the set-aside part removed, so what remains is the dominant
     content. Falls back to the whole message when the aside is not a literal slice of
@@ -108,13 +128,6 @@ class MessagePipeline:
         self.tz = settings.timezone
 
     async def handle(self, content: MessageContent, raw_text: str) -> list[OutgoingMessage]:
-        if isinstance(content, ImageContent):
-            return [
-                OutgoingMessage(
-                    text="Il riconoscimento delle foto non è ancora disponibile: scrivimi cosa hai mangiato."
-                )
-            ]
-
         draft = await drafts.get_open_draft(self.session, self.user.id)
         if draft is not None and drafts.is_expired(draft, self.settings.draft_expiry_minutes):
             await drafts.discard_draft(self.session, self.user.id)
@@ -122,6 +135,9 @@ class MessagePipeline:
 
         if draft is not None:
             return await self._handle_with_open_draft(draft, content, raw_text)
+
+        if isinstance(content, ImageContent):
+            return await self._handle_photo(content)
 
         return await self._handle_fresh(content, raw_text)
 
@@ -157,7 +173,7 @@ class MessagePipeline:
         elif intent == "report":
             messages += await self._handle_report(content)
         else:
-            reply = await handle_other(self.gateway, raw_text, content)
+            reply = await handle_other(self.gateway, raw_text, content, self.settings.bot_label)
             messages.append(OutgoingMessage(text=reply))
         return messages
 
@@ -193,6 +209,119 @@ class MessagePipeline:
             return classification.intent, content
 
         return second.intent, TextContent(text=remainder)
+
+    # -- photo --------------------------------------------------------------
+
+    async def _first_photo_notice(self) -> str:
+        """Prefixed onto the first photo reply only, so photos are established as
+        'processed, not kept' and as still needing a portion answer before the user
+        is surprised by either (tasks.md 7.1, 7.2)."""
+        if self.user.photo_notice_shown:
+            return ""
+        self.user.photo_notice_shown = True
+        await self.session.flush()
+        return PHOTO_NOTICE
+
+    async def _handle_photo(self, content: ImageContent) -> list[OutgoingMessage]:
+        notice = await self._first_photo_notice()
+        raw_bytes = base64.b64decode(content.base64_data)
+        classification = await classify_photo(self.gateway, content)
+
+        if classification.kind == "label":
+            messages = await self._handle_label_photo(content)
+        elif classification.kind == "barcode":
+            messages = await self._handle_barcode_photo(raw_bytes)
+        elif classification.kind == "dish":
+            messages = await self._handle_dish_photo(content)
+        else:
+            messages = [
+                OutgoingMessage(
+                    text=(
+                        "Non ho riconosciuto niente in questa foto: prova con una foto più "
+                        "chiara, oppure scrivimi cosa hai mangiato."
+                    )
+                )
+            ]
+
+        if notice and messages:
+            messages[0] = OutgoingMessage(
+                text=notice + messages[0].text,
+                buttons=messages[0].buttons,
+                photo_png=messages[0].photo_png,
+                entry_ref=messages[0].entry_ref,
+            )
+        return messages
+
+    async def _handle_label_photo(self, content: ImageContent) -> list[OutgoingMessage]:
+        try:
+            result = await resolve_from_label(self.session, self.gateway, content)
+        except LabelUnreadable:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Non sono riuscito a leggere l'etichetta con sicurezza: prova con "
+                        "una foto più chiara e a fuoco, oppure scrivimi l'alimento."
+                    )
+                )
+            ]
+        items = food_planner.build_items(_single_food_extraction(result.display_name_it))
+        return await self._start_food_from_items(items)
+
+    async def _handle_barcode_photo(self, raw_bytes: bytes) -> list[OutgoingMessage]:
+        code = decode_barcode(raw_bytes)
+        if code is None:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Non sono riuscito a leggere il codice a barre: prova con una foto "
+                        "più chiara, o fotografa l'etichetta nutrizionale."
+                    )
+                )
+            ]
+        try:
+            product = await lookup_product(code, self.settings)
+        except LookupUnavailable:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Il servizio di ricerca prodotti è temporaneamente non disponibile: "
+                        "prova a fotografare l'etichetta nutrizionale."
+                    )
+                )
+            ]
+        if product is None:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Non ho trovato questo prodotto nel database: prova a fotografare "
+                        "l'etichetta nutrizionale."
+                    )
+                )
+            ]
+        key = normalize_description(product.display_name_it)
+        await write_resolution(
+            self.session,
+            key=key,
+            kcal_per_100g=product.kcal_per_100g,
+            provenance=Provenance.off,
+            display_name_it=product.display_name_it,
+        )
+        items = food_planner.build_items(_single_food_extraction(product.display_name_it))
+        return await self._start_food_from_items(items)
+
+    async def _handle_dish_photo(self, content: ImageContent) -> list[OutgoingMessage]:
+        dish = await extract_dish(self.gateway, content)
+        if not dish.items:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Non ho riconosciuto alimenti in questa foto: prova con una foto più "
+                        "chiara, oppure scrivimi cosa hai mangiato."
+                    )
+                )
+            ]
+        items = food_planner.build_items(to_food_extraction(dish))
+        return await self._start_food_from_items(items)
 
     # -- open-draft dispatch ------------------------------------------------
 
@@ -231,6 +360,24 @@ class MessagePipeline:
             )
         ]
 
+    async def _abandon_draft(self, draft) -> list[OutgoingMessage]:
+        """A user-initiated abandon (the "lascia perdere" button), as opposed to
+        `_give_up_on_draft`'s give-up-after-repeated-failures. Must not claim nothing
+        was recorded when earlier items in the same draft already were - a dish photo
+        with several foods stores each as soon as its portion is known, so an abandon
+        on food 2 of 3 leaves food 1 stored (tasks.md 5.3)."""
+        remaining = drafts.all_items(draft)[draft.payload["current_index"] :]
+        described: list[str] = [
+            d
+            for item in remaining
+            if (d := item.get("description") or item.get("activity_description"))
+        ]
+        await drafts.discard_draft(self.session, self.user.id)
+        if not described:
+            return [OutgoingMessage(text="Va bene, non ho registrato niente.")]
+        text = "Va bene, non ho registrato: " + ", ".join(described) + "."
+        return [OutgoingMessage(text=text)]
+
     async def _handle_with_open_draft(
         self, draft, content: MessageContent, raw_text: str
     ) -> list[OutgoingMessage]:
@@ -245,8 +392,7 @@ class MessagePipeline:
 
         # Checked before the answer is parsed, so it can never be read as a quantity.
         if raw_text.strip() == ABANDON_OPTION:
-            await drafts.discard_draft(self.session, self.user.id)
-            return [OutgoingMessage(text="Va bene, non ho registrato niente.")]
+            return await self._abandon_draft(draft)
 
         resolved_before = dict(item.get("resolved", {}))
         updated_item = planner.apply_answer(item, field, raw_text)
@@ -284,6 +430,14 @@ class MessagePipeline:
         draft = await drafts.create_draft(self.session, self.user.id, DraftIntent.food, items)
         return await self._advance_food_draft(draft)
 
+    async def _start_food_from_items(self, items: list) -> list[OutgoingMessage]:
+        """Shared by the label, barcode and dish photo paths: each produces one or
+        more food items with no quantity, which then go through the ordinary food
+        draft/clarification loop exactly like a typed message would (design.md -
+        Photo-derived entries are ordinary entries)."""
+        draft = await drafts.create_draft(self.session, self.user.id, DraftIntent.food, items)
+        return await self._advance_food_draft(draft)
+
     async def _advance_food_draft(self, draft) -> list[OutgoingMessage]:
         messages: list[OutgoingMessage] = []
         while drafts.has_more_items(draft):
@@ -307,6 +461,10 @@ class MessagePipeline:
         text = f"Registrato: {entry.description} {entry.grams:.0f}g - {entry.kcal:.0f} kcal"
         if finalized.is_estimate:
             text += " (stima)"
+        if entry.provenance == Provenance.etichetta:
+            text += " (da etichetta)"
+        elif entry.provenance == Provenance.off:
+            text += f" (da Open Food Facts)\n{ATTRIBUTION}"
         if finalized.quantity_is_estimated_from_count:
             text += f" [porzione stimata: {entry.grams:.0f}g]"
         return OutgoingMessage(text=text, entry_ref=("food", entry.id))

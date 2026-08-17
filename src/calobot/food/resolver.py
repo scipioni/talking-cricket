@@ -22,6 +22,19 @@ from calobot.persistence.timeutil import utcnow
 MAX_PLAUSIBLE_KCAL_PER_100G = 950  # pure fat (~900) plus headroom; catches OCR/LLM magnitude errors
 MIN_PLAUSIBLE_KCAL_PER_100G = 0
 
+# Trust ordering across provenance values (design.md - Label reading writes straight
+# into the resolution cache): a photographed label is ground truth for the item the
+# user is actually holding; a lookup service record may describe a different pack;
+# the bundled table is a matched row, not the exact product; a model estimate is the
+# last resort. A higher-trust value overwrites a lower-trust one for the same
+# normalized key - never the reverse.
+PROVENANCE_TRUST: dict[Provenance, int] = {
+    Provenance.etichetta: 3,
+    Provenance.off: 2,
+    Provenance.tabella: 1,
+    Provenance.llm: 0,
+}
+
 
 def normalize_description(description: str) -> str:
     text = description.strip().lower()
@@ -77,6 +90,40 @@ async def _estimate(gateway: LLMGateway, content: MessageContent) -> EstimateRes
     )
 
 
+async def write_resolution(
+    session: AsyncSession,
+    *,
+    key: str,
+    kcal_per_100g: float,
+    provenance: Provenance,
+    display_name_it: str,
+) -> None:
+    """Writes a resolution into the cache, respecting the trust ordering: a
+    higher-trust value overwrites a lower-trust one for the same key, but never the
+    reverse (tasks.md 6.2)."""
+    existing = await session.get(ResolutionCache, key)
+    if existing is not None:
+        if PROVENANCE_TRUST[provenance] < PROVENANCE_TRUST[existing.provenance]:
+            return
+        existing.kcal_per_100g = kcal_per_100g
+        existing.provenance = provenance
+        existing.display_name_it = display_name_it
+        existing.created_at = utcnow()
+        await session.flush()
+        return
+
+    session.add(
+        ResolutionCache(
+            normalized_key=key,
+            kcal_per_100g=kcal_per_100g,
+            provenance=provenance,
+            display_name_it=display_name_it,
+            created_at=utcnow(),
+        )
+    )
+    await session.flush()
+
+
 async def resolve_food_energy(
     session: AsyncSession, gateway: LLMGateway, description: str
 ) -> ResolvedFood:
@@ -122,15 +169,12 @@ async def resolve_food_energy(
             display_name_it=estimate.display_name_it or description,
         )
 
-    session.add(
-        ResolutionCache(
-            normalized_key=key,
-            kcal_per_100g=resolved.kcal_per_100g,
-            provenance=resolved.provenance,
-            display_name_it=resolved.display_name_it,
-            created_at=utcnow(),
-        )
+    await write_resolution(
+        session,
+        key=key,
+        kcal_per_100g=resolved.kcal_per_100g,
+        provenance=resolved.provenance,
+        display_name_it=resolved.display_name_it,
     )
-    await session.flush()
 
     return resolved

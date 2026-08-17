@@ -28,6 +28,7 @@ TYPICAL_UNIT_WEIGHTS_G: dict[str, float] = {
     "cucchiaio": 15,
     "cucchiaino": 5,
     "bicchiere": 200,
+    "noce": 5,
 }
 
 

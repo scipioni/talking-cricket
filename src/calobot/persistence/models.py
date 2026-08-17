@@ -79,6 +79,7 @@ class User(Base):
     ritmo: Mapped[Ritmo | None] = mapped_column(Enum(Ritmo), nullable=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)
     disclaimer_shown: Mapped[bool] = mapped_column(Boolean, default=False)
+    photo_notice_shown: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     activity_levels: Mapped[list[ActivityLevelHistory]] = relationship(

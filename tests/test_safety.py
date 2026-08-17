@@ -20,7 +20,9 @@ async def test_medical_topic_refused_without_calling_llm():
     gateway = LLMGateway(settings)
     gateway._client.chat.completions.create = AsyncMock()
 
-    reply = await handle_other(gateway, "ho l'anoressia, mi aiuti?", TextContent(text="x"))
+    reply = await handle_other(
+        gateway, "ho l'anoressia, mi aiuti?", TextContent(text="x"), "Grillo Parlante"
+    )
 
     assert reply == REFUSAL_TEXT
     gateway._client.chat.completions.create.assert_not_awaited()

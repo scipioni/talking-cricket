@@ -7,7 +7,6 @@ specs/entry-correction - Deterministic targeting of an entry (controls + reply-t
 
 from __future__ import annotations
 
-import base64
 import logging
 
 from aiogram import Bot, F, Router
@@ -30,7 +29,14 @@ from calobot.llm.gateway import LLMGateway
 from calobot.persistence.engine import get_session_factory
 from calobot.persistence.models import User
 from calobot.persistence.repository import get_user_by_telegram_id
-from calobot.profile.onboarding import OPTIONS, QUESTIONS, extract_onboarding_fields, parse_and_validate
+from calobot.photo.intake import UnprocessableImage, downscale, to_base64
+from calobot.profile.onboarding import (
+    OPTIONS,
+    QUESTIONS,
+    extract_onboarding_fields,
+    parse_and_validate,
+    parse_field_raw,
+)
 from calobot.profile.service import (
     apply_onboarding_field,
     delete_all_user_data,
@@ -46,30 +52,45 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-DISCLAIMER = (
-    "Ricorda: Calobot è uno strumento di tracciamento, non un consulente medico o "
-    "un nutrizionista. Per obiettivi di salute specifici parla con un professionista."
-)
+def _disclaimer(bot_label: str) -> str:
+    return (
+        f"Ricorda: {bot_label} è uno strumento di supporto, non un consulente medico o "
+        "un nutrizionista. Per obiettivi di salute specifici parla con un professionista."
+    )
 
-WELCOME_MESSAGE = (
-    "Ciao! Sono Calobot 🤖, un bot che ti aiuta a tenere traccia di cosa mangi, del "
-    "tuo peso e delle attività fisiche che svolgi, semplicemente scrivendomi in chat "
-    "come faresti con una persona (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
-    "\"camminata di mezz'ora\"). Ti mostro poi report e grafici sull'andamento.\n\n"
-    "Per capire i tuoi messaggi uso un modello linguistico (LLM); per calcolare le "
-    "calorie mi appoggio a una tabella di composizione degli alimenti tratta da USDA "
-    "FoodData Central (dominio pubblico) e a una tabella di attività fisiche compilata "
-    "per questo progetto - quando un alimento non è in tabella, il valore è una stima "
-    "del modello, e te lo segnalo sempre.\n\n"
-    "⚠️ Nota importante: questo non è un ausilio medico, ma un software sperimentale, "
-    "fornito così com'è, senza alcuna responsabilità dell'autore per l'accuratezza dei "
-    "dati o le conseguenze del suo utilizzo. Per obiettivi di salute specifici "
-    "rivolgiti sempre a un professionista.\n\n"
-    "Iniziamo con qualche domanda per calcolare il tuo fabbisogno calorico."
-)
+
+def _welcome_message(bot_label: str) -> str:
+    return (
+        f"Ciao! Sono {bot_label} 🤖, un bot che ti aiuta a tenere traccia di cosa mangi, del "
+        "tuo peso e delle attività fisiche che svolgi, semplicemente scrivendomi in chat "
+        "come faresti con una persona (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
+        "\"camminata di mezz'ora\"). Ti mostro poi report e grafici sull'andamento.\n\n"
+        "Per capire i tuoi messaggi uso un modello linguistico (LLM); per calcolare le "
+        "calorie mi appoggio a una tabella di composizione degli alimenti tratta da USDA "
+        "FoodData Central (dominio pubblico) e a una tabella di attività fisiche compilata "
+        "per questo progetto - quando un alimento non è in tabella, il valore è una stima "
+        "del modello, e te lo segnalo sempre.\n\n"
+        "⚠️ Nota importante: questo non è un ausilio medico, ma un software sperimentale, "
+        "fornito così com'è, senza alcuna responsabilità dell'autore per l'accuratezza dei "
+        "dati o le conseguenze del suo utilizzo. Per obiettivi di salute specifici "
+        "rivolgiti sempre a un professionista.\n\n"
+        "Iniziamo con qualche domanda per calcolare il tuo fabbisogno calorico."
+    )
 
 UNAVAILABLE_TEXT = "Il servizio è temporaneamente non disponibile, riprova tra poco."
 REPHRASE_TEXT = "Non sono riuscito a capire, puoi riscrivere il messaggio?"
+
+HELP_TEXT = (
+    "Comandi disponibili:\n"
+    "/start - avvia la registrazione o mostra il tuo profilo\n"
+    "/profilo - mostra i tuoi dati e il budget calorico\n"
+    "/annulla - elimina l'ultima voce registrata\n"
+    "/cancellami - elimina definitivamente tutti i tuoi dati\n"
+    "/help - mostra questo messaggio\n\n"
+    "Per registrare cibo, peso e attività, o chiedere un report, scrivimi "
+    "semplicemente in chat (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
+    "\"report settimanale\")."
+)
 
 
 def _gateway(settings: Settings) -> LLMGateway:
@@ -107,7 +128,9 @@ async def _send_outgoing(
         )
 
 
-async def _advance_onboarding(bot: Bot, chat_id: int, session: AsyncSession, user: User) -> None:
+async def _advance_onboarding(
+    bot: Bot, chat_id: int, session: AsyncSession, user: User, settings: Settings
+) -> None:
     """Sends the next onboarding question, or completes onboarding and sends the
     disclaimer + profile summary. Shared by /start, free-text answers and button
     answers, so all three entry points stay in sync on what "the next step" is -
@@ -119,7 +142,7 @@ async def _advance_onboarding(bot: Bot, chat_id: int, session: AsyncSession, use
         await session.commit()
         if completed:
             summary = await format_profile_summary(session, user)
-            await bot.send_message(chat_id, f"{DISCLAIMER}\n\n{summary}")
+            await bot.send_message(chat_id, f"{_disclaimer(settings.bot_label)}\n\n{summary}")
         return
     question = QUESTIONS[next_field]
     await bot.send_message(chat_id, question, reply_markup=options_keyboard(OPTIONS.get(next_field, [])))
@@ -183,9 +206,14 @@ async def on_start(message: Message, bot: Bot, settings: Settings) -> None:
             return
 
         if reg.is_new:
-            await message.answer(WELCOME_MESSAGE)
+            await message.answer(_welcome_message(settings.bot_label))
 
-        await _advance_onboarding(bot, message.chat.id, session, reg.user)
+        await _advance_onboarding(bot, message.chat.id, session, reg.user, settings)
+
+
+@router.message(Command("help"))
+async def on_help(message: Message) -> None:
+    await message.answer(HELP_TEXT)
 
 
 @router.message(Command("annulla"))
@@ -249,6 +277,7 @@ async def on_photo(message: Message, bot: Bot, settings: Settings) -> None:
             await message.answer("Usa prima /start per registrarti.")
             return
 
+    await bot.send_chat_action(message.chat.id, "typing")
     file = await bot.get_file(message.photo[-1].file_id)
     if file.file_path is None:
         return
@@ -256,9 +285,18 @@ async def on_photo(message: Message, bot: Bot, settings: Settings) -> None:
     if file_bytes is None:
         return
 
+    raw_bytes = file_bytes.read()
+    try:
+        general = downscale(raw_bytes, settings.photo_max_dimension_px)
+        label = downscale(raw_bytes, settings.photo_label_max_dimension_px)
+    except UnprocessableImage:
+        await message.answer("Non riesco a leggere questo file come immagine: prova con un'altra foto.")
+        return
+
     content = ImageContent(
-        base64_data=base64.b64encode(file_bytes.read()).decode("ascii"),
+        base64_data=to_base64(general),
         caption=message.caption,
+        label_base64_data=to_base64(label),
     )
     await _run_pipeline_and_reply(
         bot, settings, message.chat.id, user, content, message.caption or ""
@@ -279,12 +317,25 @@ async def on_text(message: Message, bot: Bot, settings: Settings) -> None:
 
         if not user.onboarding_complete:
             gateway = _gateway(settings)
+            pending_field = await next_onboarding_question(session, user)
             try:
-                extraction = await extract_onboarding_fields(gateway, TextContent(text=text))
+                extraction = await extract_onboarding_fields(
+                    gateway, TextContent(text=text), expected_field=pending_field
+                )
             except (LLMUnavailableError, LLMValidationExhaustedError):
                 await message.answer(UNAVAILABLE_TEXT)
                 return
             parsed, errors = parse_and_validate(extraction)
+            if pending_field and pending_field not in parsed:
+                # The LLM extraction can miss a lexically bare answer (e.g. "54") that
+                # doesn't explicitly name a unit/field; fall back to parsing the raw
+                # message against the field we know is pending, so a valid answer never
+                # results in the same question being re-sent.
+                value, error = parse_field_raw(pending_field, text)
+                if error:
+                    errors.append(error)
+                elif value is not None:
+                    parsed[pending_field] = value
             for field, value in parsed.items():
                 error = await apply_onboarding_field(session, user, field, value)
                 if error:
@@ -294,7 +345,7 @@ async def on_text(message: Message, bot: Bot, settings: Settings) -> None:
             for err in errors:
                 await message.answer(err)
 
-            await _advance_onboarding(bot, message.chat.id, session, user)
+            await _advance_onboarding(bot, message.chat.id, session, user, settings)
             return
 
     reply_to_id = message.reply_to_message.message_id if message.reply_to_message else None
@@ -338,7 +389,7 @@ async def on_answer_callback(callback: CallbackQuery, bot: Bot, settings: Settin
                     return
             # A stale or mismatched tap (e.g. an old keyboard from an already
             # -answered question): ignore the value, just re-show the current step.
-            await _advance_onboarding(bot, chat_id, session, user)
+            await _advance_onboarding(bot, chat_id, session, user, settings)
             return
 
     await _run_pipeline_and_reply(

@@ -12,14 +12,17 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "alembic>=1.19.1",
     "fastapi>=0.141.1",
+    "httpx2>=2.10.0",
     "matplotlib>=3.11.1",
     "openai>=3.1.0",
+    "pillow>=12.3.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
+    "pyzbar>=0.1.9",
     "rapidfuzz>=3.9",
     "sqlalchemy>=2.0",
     "tzdata>=2026.3",
-    "uvicorn>=0.52.3",
+    "uvicorn[standard]>=0.52.3",
 ]
 
 [project.scripts]
@@ -34,6 +37,7 @@ dev = [
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "python-barcode>=0.16.1",
     "ruff>=0.16.3",
     "watchfiles>=1.2.0",
 ]
@@ -80,6 +84,11 @@ disable_error_code = ["union-attr", "attr-defined", "arg-type", "return-value", 
 [[tool.mypy.overrides]]
 module = "calobot.reporting.charts"
 disable_error_code = ["arg-type"]
+
+# pyzbar ships no py.typed marker or stubs on PyPI.
+[[tool.mypy.overrides]]
+module = "pyzbar.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

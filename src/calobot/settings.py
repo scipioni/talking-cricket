@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     def _blank_env_value_means_unset(cls, value: object) -> object:
         return None if value == "" else value
 
+    bot_label: str = "Grillo Parlante"
+
     database_path: str = "/data/calobot.db"
 
     timezone_name: str = "Europe/Rome"
@@ -60,6 +62,17 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     web_port: int = 8080
+
+    # Bounded resolution photos are downscaled to before inference (design.md -
+    # image inference is much more expensive than text, so size is the main lever).
+    # Labels get their own, typically higher, setting since legibility of small print
+    # matters more than it does for a dish (open question in design.md, answerable
+    # only against real photographs).
+    photo_max_dimension_px: int = 1280
+    photo_label_max_dimension_px: int = 2000
+
+    off_base_url: str = "https://world.openfoodfacts.org"
+    off_timeout_seconds: float = 5.0
 
     @property
     def timezone(self) -> ZoneInfo:

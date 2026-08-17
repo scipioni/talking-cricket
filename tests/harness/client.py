@@ -141,6 +141,9 @@ class Client:
     async def delete_me(self) -> list[SentMessage]:
         return await self.say("/cancellami")
 
+    async def help(self) -> list[SentMessage]:
+        return await self.say("/help")
+
     # -- plumbing ---------------------------------------------------------
 
     def _next_update_id(self) -> int:

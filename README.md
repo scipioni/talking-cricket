@@ -4,12 +4,12 @@
 you honest about what you eat.*
 
 A Telegram virtual nutritionist. Log food, weight and activity in free-form Italian
-chat; an LLM structures the message, deterministic code validates and computes the
-numbers, and reports come back as charts.
+chat, or by pointing a camera at it; an LLM structures the message, deterministic
+code validates and computes the numbers, and reports come back as charts.
 
 See `openspec/changes/calobot-v1/` for the full proposal, design rationale and specs
-behind this build (and `openspec/changes/calobot-photo-input/` for the planned photo
-feature, not yet implemented).
+behind the text-based build, and `openspec/changes/calobot-photo-input/` for the
+photo feature (nutrition labels, barcodes, dish photos) layered on top of it.
 
 ## How it works, in one paragraph
 
@@ -20,7 +20,11 @@ bot asks - with tappable buttons for the common answers - and merges the reply i
 a draft persisted in the database, so a restart mid-conversation doesn't lose it.
 Food and activity energy values are resolved through a cache, then a bundled lookup
 table (the model picks the best matching row), then a model estimate as a last
-resort - so the same food always costs the same the next time it's logged.
+resort - so the same food always costs the same the next time it's logged. A photo
+is classified as a nutrition label, a barcode, or a dish, and each writes its energy
+value into that same cache (with its own provenance and trust ranking, highest for
+a label, lowest for a model estimate), then joins the same draft/clarification flow
+as a typed message.
 
 ## Requirements
 
@@ -29,6 +33,9 @@ resort - so the same food always costs the same the next time it's logged.
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - An OpenAI-compatible LLM endpoint (defaults to a self-hosted Ollama instance
   running `qwen3-vl:30b-a3b-instruct`)
+- The `zbar` shared library for barcode decoding (`libzbar0` on Debian/Ubuntu,
+  `zbar` via Homebrew) - `pyzbar` binds to it via ctypes rather than a wheel, so it
+  isn't something `uv sync` alone can provide. Already installed in the Docker image.
 
 ## Local development
 
@@ -161,16 +168,31 @@ not include a backup automation, only the mechanism.
 | `/profilo` | Show the stored profile and current daily calorie budget |
 | `/annulla` | Delete the most recently logged entry |
 | `/cancellami` | Permanently delete all of your data (hard delete, not soft) |
+| `/help` | List the available commands |
 
 Everything else is free-form Italian chat: log food ("ho mangiato 10g di noci"),
 weight ("oggi peso 78kg"), activity ("camminata di mezz'ora"), corrections ("no
 erano 20g" - or reply directly to the confirmation message), or ask for a report
 ("report di questa settimana").
 
+You can also just send a photo instead of typing:
+
+- **A nutrition label** is read directly (energy per 100 g, product name where
+  legible) - the most accurate input the system accepts, and it teaches the system
+  that product permanently: a later typed mention of the same product resolves from
+  the same reading.
+- **A barcode** is decoded locally and looked up against
+  [Open Food Facts](https://openfoodfacts.org) (data used under ODbL, attributed in
+  the confirmation).
+- **A photo of a dish** identifies the foods on the plate, one draft each.
+
+A photo never establishes quantity by itself - it still asks "quanto?" for each
+food, the same one-tap clarification a typed message gets. Photos are processed and
+discarded; nothing is written to disk. See `openspec/changes/calobot-photo-input/`
+for the full design.
+
 ## What's deliberately not here yet
 
-Photo/barcode input, free-text corrections of historical entries, and automatic
-recalibration of the activity factor are out of scope for this build - see
-`openspec/changes/calobot-v1/proposal.md` for why, and
-`openspec/changes/calobot-photo-input/` for the photo feature's design, ready to
-implement once this change is archived.
+Free-text corrections of historical entries and automatic recalibration of the
+activity factor are out of scope for now - see `openspec/changes/calobot-v1/proposal.md`
+for why.

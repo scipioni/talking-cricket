@@ -34,6 +34,27 @@ async def test_onboarding_button_answer_is_applied_to_profile(db_session, client
     assert "nato" in sent[0].text.lower() or "età" in sent[0].text.lower()
 
 
+async def test_bare_number_answers_birthdate_question_without_looping(db_session, client, llm):
+    """Regression test: a live conversation got stuck re-asking "Quando sei nato/a?"
+    forever after the user answered with a bare age ("54"). The LLM extraction call
+    has no signal that "54" refers to data_nascita specifically (no "anni", no unit),
+    so a cautious model returning everything null was silently treated as "nothing
+    to apply", and the identical question was re-sent. The fix falls back to the
+    deterministic per-field parser for whichever field is actually pending."""
+    await client.start()
+    await client.tap("maschio")  # onboarding advances to the birth date/age question
+
+    llm.push({})  # an all-null extraction, as a model unsure how to attribute "54"
+    sent = await client.say("54")
+
+    user = await _reload(db_session, client.telegram_user_id)
+    assert user.data_nascita is not None
+
+    assert len(sent) == 1
+    assert "nato" not in sent[0].text.lower()  # must not repeat the same question
+    assert "alto" in sent[0].text.lower()  # advanced to the next one (altezza_cm)
+
+
 async def test_stale_button_tap_does_not_corrupt_a_later_field(db_session, client):
     """Tapping an old keyboard from an already-answered question must not force the
     tapped label onto whatever field onboarding has since moved on to."""
