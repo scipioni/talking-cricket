@@ -39,9 +39,18 @@ un'ora di nuoto
 ### Chiedi un report
 ```
 report di questa settimana
-come sto andando?
 statistiche di agosto
 ```
+
+### Fai domande sui tuoi dati
+Non solo report fissi: puoi chiedere quello che vuoi sapere, e il Grillo controlla il tuo diario prima di risponderti.
+```
+come sto andando questa settimana?
+sto mangiando meglio del mese scorso?
+posso permettermi una pizza stasera?
+mangio troppo tardi la sera?
+```
+Se una risposta richiede dati che non hai ancora registrato, o informazioni che il Grillo non traccia (come i grammi di proteine), te lo dice chiaramente invece di inventare un numero.
 
 ### Correggi un errore
 ```
@@ -91,6 +100,9 @@ Sì, per comunicare con Telegram e per le funzioni AI.
 
 **Posso usare un altro bot su Telegram?**
 Sì, il tuo profile e cronologia restano associati al tuo account Telegram, non al bot.
+
+**Il Grillo può darmi consigli medici o su una dieta?**
+No. Non è uno strumento medico: su domande cliniche, farmaci o disturbi alimentari ti indirizza sempre a un professionista. Può invece leggere e spiegarti i tuoi dati, ma non modificarli o eliminarli su richiesta - per quello usa `/annulla` o i pulsanti sotto ogni voce registrata.
 
 ---
 

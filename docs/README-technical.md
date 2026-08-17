@@ -7,9 +7,12 @@ A Telegram virtual nutritionist. Log food, weight and activity in free-form Ital
 chat, or by pointing a camera at it; an LLM structures the message, deterministic
 code validates and computes the numbers, and reports come back as charts.
 
-See `openspec/changes/calobot-v1/` for the full proposal, design rationale and specs
-behind the text-based build, and `openspec/changes/calobot-photo-input/` for the
-photo feature (nutrition labels, barcodes, dish photos) layered on top of it.
+See `openspec/changes/archive/2026-08-16-calobot-v1/` for the full proposal, design
+rationale and specs behind the text-based build,
+`openspec/changes/archive/2026-08-17-calobot-photo-input/` for the photo feature
+(nutrition labels, barcodes, dish photos) layered on top of it, and
+`openspec/changes/archive/2026-08-17-calobot-advice-agent/` for the read-only agent
+that answers open-ended questions about a user's own data.
 
 ## How it works, in one paragraph
 
@@ -188,11 +191,38 @@ You can also just send a photo instead of typing:
 
 A photo never establishes quantity by itself - it still asks "quanto?" for each
 food, the same one-tap clarification a typed message gets. Photos are processed and
-discarded; nothing is written to disk. See `openspec/changes/calobot-photo-input/`
-for the full design.
+discarded; nothing is written to disk. See
+`openspec/changes/archive/2026-08-17-calobot-photo-input/` for the full design.
+
+## Asking questions about your own data
+
+A message that is not a log, a correction or a report request ("come sono andato
+questa settimana?", "posso permettermi una pizza stasera?") goes to a read-only
+advice agent instead of a plain conversational reply. It works in two bounded steps:
+
+1. **Gather** - the model may call a small, whitelisted set of read-only tools (each
+   wrapping the same deterministic aggregator that produces a report or chart) up to
+   `CALOBOT_LLM_ADVICE_MAX_ROUNDS` times (default 4). Whose data it reads is bound to
+   the sender's Telegram identity outside the conversation - no tool accepts a user
+   identifier, so no message can redirect it to someone else's diary.
+2. **Narrate** - one schema-constrained call turns whatever was retrieved into the
+   Italian reply. The model never computes a figure itself; every number it states
+   is the one a tool returned, so an answer for a period cannot disagree with a
+   report for the same period. When the data needed doesn't exist - nothing logged
+   in the period, or a quantity the bot doesn't track (macronutrients, for instance)
+   - it says so instead of estimating.
+
+The agent cannot create, edit or delete anything: it is confined to the same
+read-only tools regardless of what a message asks for, and a reply that claims a
+record was made, changed or removed is suppressed and replaced. The existing medical
+and eating-disorder refusal runs before the agent does anything, exactly as it does
+on the plain conversational path. See `docs/agent.md` for the tool catalog, a worked
+example, and how to add a tool, and
+`openspec/changes/archive/2026-08-17-calobot-advice-agent/` for the full design and
+the requirements each of these behaviours traces to.
 
 ## What's deliberately not here yet
 
 Free-text corrections of historical entries and automatic recalibration of the
-activity factor are out of scope for now - see `openspec/changes/calobot-v1/proposal.md`
-for why.
+activity factor are out of scope for now - see
+`openspec/changes/archive/2026-08-16-calobot-v1/proposal.md` for why.

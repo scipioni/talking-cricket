@@ -100,6 +100,12 @@ async def export_session(chat_id: int) -> dict[str, Any]:
                     "latency_seconds": event.get("latency_seconds"),
                     "success": event.get("success"),
                     "error": event.get("error"),
+                    # Present only on advice-agent calls, so a monitor can group one
+                    # agent turn (design.md - Group an agent turn in telemetry with a
+                    # correlation id). None on every other step, by construction.
+                    "agent_turn_id": event.get("agent_turn_id"),
+                    "round_index": event.get("round_index"),
+                    "tool_name": event.get("tool_name"),
                 }
             )
 

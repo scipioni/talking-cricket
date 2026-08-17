@@ -14,6 +14,7 @@ import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.activity import planner as activity_planner
+from calobot.advice.agent import answer as advice_answer
 from calobot.corrections.service import amend_food_quantity
 from calobot.food import planner as food_planner
 from calobot.food.resolver import normalize_description, resolve_food_energy, write_resolution
@@ -47,7 +48,6 @@ from calobot.reporting.aggregation import (
 from calobot.reporting.charts import render_calorie_chart, render_weight_chart
 from calobot.reporting.dietician import build_dietitian_review, format_dietician_review
 from calobot.reporting.periods import parse_period
-from calobot.safety.conversation import handle_other
 from calobot.settings import Settings
 from calobot.weight.normalizer import normalize_weight_text
 from calobot.weight.service import NeedsConfirmation, Rejected, Stored, apply_weight
@@ -174,7 +174,16 @@ class MessagePipeline:
         elif intent == "report":
             messages += await self._handle_report(content)
         else:
-            reply = await handle_other(self.gateway, raw_text, content, self.settings.bot_label)
+            reply = await advice_answer(
+                self.session,
+                self.gateway,
+                self.user,
+                self.tz,
+                raw_text,
+                content,
+                self.settings.bot_label,
+                self.settings.llm_advice_max_rounds,
+            )
             messages.append(OutgoingMessage(text=reply))
         return messages
 

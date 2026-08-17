@@ -20,12 +20,17 @@ overwritten twice. A finding is durable once it is in a test.
 from __future__ import annotations
 
 from harness.invariants import claims_something_was_recorded
-from harness.llm import ScriptedLLM
+from harness.llm import NoMoreToolCalls, ScriptedLLM
 from harness.state import create_onboarded_user
 from sqlalchemy import select
 
 from calobot.persistence.models import FoodEntry
 from calobot.persistence.seed import seed_all
+
+# The advice agent's gather phase, staged as "no data needed" - used by every test
+# below that reaches conversation rather than a log, so the narration call is the
+# next (and usually final) staged payload.
+_NO_RETRIEVAL_NEEDED = NoMoreToolCalls()
 
 MULTI_INTENT_MESSAGE = (
     "cena: 150g di pasta con sugo + 200g di pollo, peso oggi 89.3 kg, "
@@ -100,24 +105,26 @@ async def test_the_contradiction_routes_the_message_to_the_log(db_session, run, 
     run.assert_clean()
 
 
-async def test_an_ordinary_greeting_costs_one_classification_and_one_reply(
+async def test_an_ordinary_greeting_costs_one_classification_and_one_agent_turn(
     db_session, run, monkeypatch
 ):
     """The common path is untouched: no ignored text, so no contradiction, so no extra
-    model call. If this ever needs a third response staged, the reroute has started
-    firing on messages it should not."""
+    reclassification call. The advice agent still costs a gather round (staged here
+    as needing no retrieval) plus one narration call. If this ever needs a fourth
+    response staged, the reroute has started firing on messages it should not."""
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
 
     llm = _install(run, monkeypatch)
     llm.push(
         {"intent": "other", "ignored_text": None},
-        {"reply_text": "Ciao! Dimmi pure cosa hai mangiato."},
+        _NO_RETRIEVAL_NEEDED,
+        {"answer_text": "Ciao! Dimmi pure cosa hai mangiato.", "used_data": False, "declined_reason": None},
     )
 
     await run.say("ciao come stai")
 
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 3
     run.assert_clean()
 
 
@@ -125,7 +132,7 @@ async def test_a_contradiction_the_classifier_stands_by_falls_back_to_conversati
     db_session, run, monkeypatch
 ):
     """Task 2.3: when the remainder is still not loggable, nothing is stored and the
-    message is answered as conversation."""
+    message is answered by the advice agent."""
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
 
@@ -133,7 +140,8 @@ async def test_a_contradiction_the_classifier_stands_by_falls_back_to_conversati
     llm.push(
         {"intent": "other", "ignored_text": "una cosa a caso"},
         {"intent": "other", "ignored_text": None},  # remainder: still conversation
-        {"reply_text": "Non ho capito bene, puoi ripetere?"},
+        _NO_RETRIEVAL_NEEDED,
+        {"answer_text": "Non ho capito bene, puoi ripetere?", "used_data": False, "declined_reason": None},
     )
 
     await run.say("buonasera, una cosa a caso")
@@ -148,13 +156,21 @@ async def test_a_contradiction_the_classifier_stands_by_falls_back_to_conversati
 
 async def test_a_conversational_reply_never_claims_a_record(db_session, run, monkeypatch):
     """The guard, isolated from routing: the classifier reports no ignored text, so
-    nothing reroutes, and the reply still claims three records were made. Nothing was
-    stored, so the claim must not reach the user."""
+    nothing reroutes, and the narration still claims three records were made. Nothing
+    was stored, so the claim must not reach the user."""
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
 
     llm = _install(run, monkeypatch)
-    llm.push({"intent": "other", "ignored_text": None}, RECORDED_REPLY)
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        _NO_RETRIEVAL_NEEDED,
+        {
+            "answer_text": RECORDED_REPLY["reply_text"],
+            "used_data": False,
+            "declined_reason": None,
+        },
+    )
 
     sent = await run.say(MULTI_INTENT_MESSAGE)
 
@@ -172,7 +188,11 @@ async def test_a_conversational_reply_making_no_claim_is_sent_unchanged(
 
     llm = _install(run, monkeypatch)
     reply = "Ciao! Scrivimi cosa hai mangiato e lo aggiungo al diario."
-    llm.push({"intent": "other", "ignored_text": None}, {"reply_text": reply})
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        _NO_RETRIEVAL_NEEDED,
+        {"answer_text": reply, "used_data": False, "declined_reason": None},
+    )
 
     sent = await run.say("ciao")
 

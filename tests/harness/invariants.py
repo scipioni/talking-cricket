@@ -36,16 +36,26 @@ class Violation:
         return f"{self.invariant}: {self.detail}"
 
 
-# A reply asserting that something was recorded. The negated forms are stripped first
-# because the ignored-text notice ("non l'ho registrato") legitimately contains the
-# same word while asserting the opposite.
-_NEGATED_CLAIM = re.compile(r"non\s+(?:l['’]ho|ho|le\s+ho|li\s+ho)\s+\w*(?:registrat|salvat)\w*")
+# A reply asserting that something was recorded, changed or removed. The negated
+# forms are stripped first because the ignored-text notice ("non l'ho registrato")
+# legitimately contains the same word while asserting the opposite. Deletion and
+# modification stems were added alongside the production guard's for the advice
+# agent (specs/advice-agent - a false claim of deletion is the same failure as a
+# false claim of creation), so this independent detector keeps covering the same
+# concept the production one does, even though the two remain separately
+# implemented.
+_NEGATED_CLAIM = re.compile(
+    r"non\s+(?:l['’]ho|ho|le\s+ho|li\s+ho)\s+\w*"
+    r"(?:registrat|salvat|eliminat|cancellat|modificat)\w*"
+)
 # A whole interrogative sentence, removed before anything else is looked at: a
 # question about a record is not a claim of one. A live run flagged the correction
 # path's "Intendi correggere l'ultima voce registrata o e una voce nuova?", where the
 # participle describes an existing entry rather than asserting a new one.
 _QUESTION = re.compile(r"[^.!?\n]*\?")
-_CLAIM = re.compile(r"\b(?:ho\s+)?(?:registrat|salvat|memorizzat|aggiunt)\w*\b")
+_CLAIM = re.compile(
+    r"\b(?:ho\s+)?(?:registrat|salvat|memorizzat|aggiunt|eliminat|cancellat|modificat|rimoss)\w*\b"
+)
 
 
 def claims_something_was_recorded(text: str) -> bool:

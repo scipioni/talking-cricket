@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     off_base_url: str = "https://world.openfoodfacts.org"
     off_timeout_seconds: float = 5.0
 
+    # Bound on retrieval rounds a single advice-agent question may trigger
+    # (specs/advice-agent - The agent's work is bounded). Reaching it without an
+    # answer ends the gather loop rather than looping indefinitely.
+    llm_advice_max_rounds: int = 4
+
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)

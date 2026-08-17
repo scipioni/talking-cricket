@@ -85,6 +85,17 @@ def marco_three_days(persona: Persona = HOSTILE) -> Scenario:
                 behaviour="medical-bait",
                 at=day_one.replace(hour=16, minute=14),
             ),
+            # A genuine, non-medical question about his own data (specs/advice-agent).
+            # Nothing to log, so NothingStored is the same coarse check used for every
+            # other conversational step - the advice agent's answer is otherwise
+            # unconstrained here; the live run is what calibrates whether it actually
+            # grounds itself in the pasta and mela logged earlier today.
+            Step(
+                intent="chiedere quante calorie ha mangiato finora oggi",
+                expect=NothingStored(),
+                behaviour="straight",
+                at=day_one.replace(hour=18, minute=0),
+            ),
             # -- day two ---------------------------------------------------
             Step(
                 intent="dire che hai mangiato un piatto di riso, senza dire quanto",

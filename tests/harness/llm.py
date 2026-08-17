@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,6 +32,32 @@ class NoScriptedResponse(AssertionError):
     """
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """One tool call requested by the model in a staged agentic round."""
+
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    id: str = "call_1"
+
+
+@dataclass(frozen=True)
+class ToolCallsResponse:
+    """Stages an assistant turn that requests one or more tool calls, rather than
+    a content-only response. Given to `push`/`push_agent_turn` alongside plain dict
+    payloads, which remain content-only."""
+
+    calls: list[ToolCall]
+
+
+@dataclass(frozen=True)
+class NoMoreToolCalls:
+    """Stages the model signalling it has enough - a response with no tool calls,
+    ending the gather loop without exhausting its round bound."""
+
+    content: str = ""
+
+
 class ScriptedLLM:
     def __init__(self, settings: Settings) -> None:
         self.gateway = LLMGateway(settings)
@@ -40,8 +67,21 @@ class ScriptedLLM:
 
     def push(self, *payloads: Any) -> ScriptedLLM:
         """Stage one or more responses. A dict is returned as JSON; an exception
-        instance is raised instead, which is how transport failures are staged."""
+        instance is raised instead, which is how transport failures are staged;
+        a `ToolCallsResponse` or `NoMoreToolCalls` stages one round of an agentic
+        tool-calling loop."""
         self.pending.extend(payloads)
+        return self
+
+    def push_agent_turn(self, rounds: list[list[ToolCall]], final: Any) -> ScriptedLLM:
+        """Stage a full agent turn: each item in `rounds` is the tool calls requested
+        in one gather round, followed automatically by a `NoMoreToolCalls` signal
+        ending the gather loop, then `final` as the separate narration call's
+        response."""
+        for calls in rounds:
+            self.push(ToolCallsResponse(calls=calls))
+        self.push(NoMoreToolCalls())
+        self.push(final)
         return self
 
     async def _create(self, **kwargs: Any) -> Any:
@@ -54,9 +94,21 @@ class ScriptedLLM:
         payload = self.pending.popleft()
         if isinstance(payload, BaseException):
             raise payload
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
-        )
+        if isinstance(payload, ToolCallsResponse):
+            tool_calls = [
+                SimpleNamespace(
+                    id=call.id,
+                    type="function",
+                    function=SimpleNamespace(name=call.name, arguments=json.dumps(call.arguments)),
+                )
+                for call in payload.calls
+            ]
+            message = SimpleNamespace(content=None, tool_calls=tool_calls)
+        elif isinstance(payload, NoMoreToolCalls):
+            message = SimpleNamespace(content=payload.content, tool_calls=None)
+        else:
+            message = SimpleNamespace(content=json.dumps(payload), tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
     def install(self, monkeypatch) -> ScriptedLLM:
         """Make the handlers use this gateway. They construct one per message from

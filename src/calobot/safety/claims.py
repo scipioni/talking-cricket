@@ -16,8 +16,14 @@ from __future__ import annotations
 
 import re
 
-# Verb stems that assert something was written down. Stems rather than whole words,
-# because Italian inflects these heavily (registrato/registrata/registrati/registrate).
+# Verb stems that assert something was written to, changed in, or removed from the
+# diary. Stems rather than whole words, because Italian inflects these heavily
+# (registrato/registrata/registrati/registrate). Deletion and modification stems were
+# added for the advice agent (specs/advice-agent - The agent's data access is
+# read-only: "Answer claims a record was made" covers recorded, changed or removed
+# alike), and apply equally on the conversational path this guard already covered -
+# a false claim of having deleted or edited an entry is the same failure as a false
+# claim of having created one.
 _RECORDED_STEMS = (
     "registrat",
     "salvat",
@@ -25,6 +31,10 @@ _RECORDED_STEMS = (
     "annotat",
     "aggiunt",
     "inserit",
+    "eliminat",
+    "cancellat",
+    "modificat",
+    "rimoss",
 )
 
 _NEGATIONS = ("non", "nessun", "nessuna", "niente", "nulla", "senza")

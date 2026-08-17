@@ -75,6 +75,7 @@ module = [
     "calobot.persistence.repository",
     "calobot.reporting.aggregation",
     "calobot.corrections.service",
+    "calobot.advice.tools",
 ]
 disable_error_code = ["union-attr", "attr-defined", "arg-type", "return-value", "misc"]
 

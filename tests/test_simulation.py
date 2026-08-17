@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 
 from harness.library import marco_three_days
+from harness.llm import NoMoreToolCalls
 from harness.scenario import (
     COOPERATIVE,
     HOSTILE,
@@ -230,7 +231,11 @@ async def test_metrics_are_reported_and_do_not_fail_the_run(
         steps=[Step(intent="say hello", expect=NothingStored())],
     )
     agent_llm.push({"message": "ciao come stai"})
-    llm.push({"intent": "other", "ignored_text": None}, {"reply_text": "Ciao!"})
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        NoMoreToolCalls(),
+        {"answer_text": "Ciao!", "used_data": False, "declined_reason": None},
+    )
 
     report = await _run(scenario, db_session=db_session, run=run, agent_llm=agent_llm, settings=settings)
 

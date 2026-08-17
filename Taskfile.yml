@@ -48,6 +48,12 @@ tasks:
     cmds:
       - uv run python -m calobot.main
 
+  dev:stop:
+    desc: Stop a `task dev`/`dev:once` instance left running (e.g. backgrounded with &)
+    cmds:
+      - pkill -f "watchfiles calobot.main.run" || true
+      - pkill -f "python -m calobot.main" || true
+
   migrate:
     desc: Apply pending Alembic migrations locally
     deps: [setup]

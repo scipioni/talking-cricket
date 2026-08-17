@@ -10,6 +10,7 @@ import datetime as dt
 
 import pytest
 from harness.invariants import check_all
+from harness.llm import NoMoreToolCalls
 from harness.run import RunStopped
 from harness.state import create_onboarded_user, food_extraction
 
@@ -212,7 +213,11 @@ async def test_a_violation_names_the_action_that_caused_it(db_session, run, llm)
     db_session.add(_food(user.id, grams=0.0, kcal=0.0))
     await db_session.flush()
 
-    llm.push({"intent": "other", "ignored_text": None}, {"reply_text": "ciao"})
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        NoMoreToolCalls(),
+        {"answer_text": "ciao", "used_data": False, "declined_reason": None},
+    )
     with pytest.raises(RunStopped) as caught:
         await run.say("secondo messaggio")
 
@@ -321,9 +326,17 @@ async def test_the_action_cap_stops_the_run(db_session, run, llm):
     await create_onboarded_user(db_session, 42)
     run.action_cap = 2
 
-    llm.push({"intent": "other", "ignored_text": None}, {"reply_text": "ciao"})
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        NoMoreToolCalls(),
+        {"answer_text": "ciao", "used_data": False, "declined_reason": None},
+    )
     await run.say("uno")
-    llm.push({"intent": "other", "ignored_text": None}, {"reply_text": "ciao"})
+    llm.push(
+        {"intent": "other", "ignored_text": None},
+        NoMoreToolCalls(),
+        {"answer_text": "ciao", "used_data": False, "declined_reason": None},
+    )
     await run.say("due")
 
     with pytest.raises(RunStopped, match="cap of 2 actions"):

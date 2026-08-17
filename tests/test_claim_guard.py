@@ -15,6 +15,7 @@ from harness.invariants import claims_something_was_recorded as harness_detector
 from harness.state import create_onboarded_user, food_extraction
 from sqlalchemy import select
 
+from calobot.advice.agent import UNFOUNDED_CLAIM_REPLACEMENT as ADVICE_UNFOUNDED_CLAIM_REPLACEMENT
 from calobot.persistence.models import FoodEntry
 from calobot.persistence.seed import seed_all
 from calobot.safety.claims import asserts_a_record
@@ -26,6 +27,12 @@ CLAIMS = [
     "Peso registrato: 89.5 kg",
     "Ok, ho salvato tutto.",
     "L'ho aggiunta al diario di oggi.",
+    # Added for the advice agent (specs/advice-agent - "Answer claims a record was
+    # made" covers recorded, changed or removed alike): a false claim of deletion or
+    # modification is the same failure as a false claim of creation.
+    "Ho eliminato la cena di oggi.",
+    "Ho cancellato la voce del pranzo.",
+    "Ho modificato il tuo obiettivo di peso a 60 kg.",
 ]
 
 NOT_CLAIMS = [
@@ -41,6 +48,8 @@ NOT_CLAIMS = [
     "Il peso indicato non è in un intervallo plausibile.",
     "Ciao! Scrivimi cosa hai mangiato e lo aggiungo al diario.",
     "Non ho capito. Quanto pesava la porzione?",
+    "Non posso eliminare o modificare nulla: posso solo leggere i tuoi dati.",
+    "Vuoi che ti spieghi come eliminare una voce dal diario?",
 ]
 
 
@@ -70,6 +79,12 @@ def test_negation_is_scoped_to_its_own_clause():
 def test_the_replacement_message_does_not_itself_claim_a_record():
     """It would be an unfortunate loop."""
     assert not asserts_a_record(UNFOUNDED_CLAIM_REPLACEMENT)
+
+
+def test_the_advice_agents_replacement_message_does_not_itself_claim_a_record():
+    """Same loop, guarded the same way, for the advice agent's own replacement text."""
+    assert not asserts_a_record(ADVICE_UNFOUNDED_CLAIM_REPLACEMENT)
+    assert not harness_detector(ADVICE_UNFOUNDED_CLAIM_REPLACEMENT)
 
 
 # -- scoping --------------------------------------------------------------
