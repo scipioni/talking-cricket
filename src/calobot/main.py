@@ -73,6 +73,7 @@ async def _async_main(settings: Settings) -> None:
     )
     server = uvicorn.Server(config)
 
+    logger.info("web interface listening on http://localhost:%d", settings.web_port)
     logger.info(
         "starting concurrent bot long polling and telemetry fastapi web server on port %d",
         settings.web_port,
