@@ -247,3 +247,8 @@ The system SHALL NOT store a food or activity entry whose quantity is zero, nega
 
 - **WHEN** a user states a quantity of zero for a food
 - **THEN** no entry is stored, because there is nothing to record
+
+#### Scenario: A unit stated in a free-text answer
+
+- **WHEN** a user answers a clarification question in free text with an explicit unit, such as "2 ore" for a duration or "1 kg" for a portion
+- **THEN** the stored quantity reflects that unit, rather than the bare number being taken as the default unit of minutes or grams

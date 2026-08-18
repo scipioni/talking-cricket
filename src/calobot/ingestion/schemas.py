@@ -26,7 +26,17 @@ class FoodItemExtraction(BaseModel):
     quantity_grams: float | None = Field(default=None, ge=0, le=5000)
     quantity_count: float | None = Field(default=None, ge=0, le=50)
     count_unit_hint: str | None = None  # e.g. "mela", "uovo", "fetta"
+    # Fallback for count_unit_hint values missing from TYPICAL_UNIT_WEIGHTS_G, whose
+    # every miss used to send a precise count to the vague-portion clarification -
+    # see quantities.py.
+    typical_unit_weight_g: float | None = Field(default=None, ge=0, le=5000)
     household_measure: str | None = None  # e.g. "un piatto", "una porzione" - not auto-resolved
+    # Only meaningful alongside household_measure: plausible gram estimates for THIS
+    # food specifically (a sauce and a pasta dish don't share a portion scale), offered
+    # as clarification buttons rather than assumed outright - see quantities.py.
+    portion_small_g: float | None = Field(default=None, ge=0, le=5000)
+    portion_medium_g: float | None = Field(default=None, ge=0, le=5000)
+    portion_generous_g: float | None = Field(default=None, ge=0, le=5000)
     preparation: str | None = None  # e.g. "fritto", "bollito", "al forno"
     preparation_material_but_unstated: bool = Field(
         default=False,
@@ -35,6 +45,10 @@ class FoodItemExtraction(BaseModel):
             "energy (e.g. pollo fritto vs bollito) and none was stated."
         ),
     )
+    # The preparations worth asking about for THIS food ("sodo"/"strapazzato" for an
+    # egg, not the generic fry/boil/bake/grill list). Deciding the flag above already
+    # requires weighing exactly these, so they cost nothing extra to return.
+    preparation_options: list[str] = Field(default_factory=list)
 
 
 class FoodExtraction(BaseModel):

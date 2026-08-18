@@ -110,6 +110,67 @@ def test_almonds_resolve_in_either_grammatical_number(hint):
     assert resolved is not None and resolved.grams == pytest.approx(3.6)
 
 
+# -- the counted noun is not always in count_unit_hint --------------------
+
+
+def test_a_count_resolves_when_the_noun_is_only_in_the_description():
+    """Reported from a live chat: "mangio una pesca" - the most ordinary phrasing
+    there is - was answered with the vague-portion question while "pesca": 150 sat in
+    the table. The model extracts count=1 but leaves count_unit_hint null, having
+    already named the food in description, and the hint was a hard requirement."""
+    resolved = resolve_quantity(_item(description="pesca", quantity_count=1))
+    assert resolved is not None and resolved.grams == 150
+    assert resolved.is_estimated_from_count
+
+
+def test_the_unit_hint_still_wins_over_the_description():
+    """In "2 fette di pane" the counted unit is the slice, not the bread: falling back
+    to the description would weigh two whole loaves."""
+    resolved = resolve_quantity(
+        _item(description="pane", quantity_count=2, count_unit_hint="fetta di pane")
+    )
+    assert resolved is not None and resolved.grams == 60
+
+
+def test_a_description_that_is_not_a_countable_unit_still_asks():
+    """The fallback must not turn every count into a resolution: "un piatto di pasta
+    al pesto" has no unit weight anywhere, and asking is the correct outcome."""
+    assert resolve_quantity(_item(description="pasta al pesto", quantity_count=1)) is None
+
+
+# -- the model's unit weight as a fallback for an unlisted countable ------
+
+
+def test_an_unlisted_countable_resolves_from_the_models_unit_weight():
+    """The table kept reopening the same bug one noun at a time (noce, then noci,
+    then mandorla): a stated, precise count degraded into a vague-portion question
+    purely because a word was missing. An estimate from extraction closes the class."""
+    resolved = resolve_quantity(
+        _item(quantity_count=3, count_unit_hint="datteri", typical_unit_weight_g=8)
+    )
+    assert resolved is not None and resolved.grams == 24
+    assert resolved.is_estimated_from_count
+
+
+def test_the_table_still_wins_over_the_models_unit_weight():
+    """The table stays authoritative where it has an answer, so "due mele" weighs the
+    same for every user on every day regardless of what the model guesses."""
+    resolved = resolve_quantity(
+        _item(quantity_count=2, count_unit_hint="mela", typical_unit_weight_g=999)
+    )
+    assert resolved is not None and resolved.grams == 360
+
+
+def test_an_unreal_unit_weight_does_not_resolve():
+    """Same floor as everywhere else: a zero-gram unit is not an amount."""
+    assert (
+        resolve_quantity(
+            _item(quantity_count=3, count_unit_hint="datteri", typical_unit_weight_g=0)
+        )
+        is None
+    )
+
+
 # -- the clarification answer path ----------------------------------------
 
 
@@ -176,6 +237,33 @@ async def test_a_dictated_zero_duration_asks_instead_of_storing(db_session, clie
     db_session.expire_all()
     assert list((await db_session.execute(select(ActivityEntry))).scalars()) == []
     assert sent[-1].options
+
+
+async def test_a_duration_typed_in_hours_is_stored_in_hours(db_session, client, llm):
+    """The whole point of the floor is that a stored quantity is the amount the user
+    meant. "2 ore" passed the floor as 2.0 and was stored as a two-minute run - wrong
+    in a way no error surfaced, because 2 is a real quantity."""
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "activity", "ignored_text": None},
+        {
+            "activity_description": "camminata",
+            "duration_minutes": None,
+            "intensity_text": "svelta",  # stated, so only the duration is missing
+            "when_text": None,
+        },
+    )
+    asked = await client.say("ho camminato svelto")
+    assert asked[-1].options
+
+    llm.push({"selected_candidate_id": None}, {"met": 4.3})
+    await client.say("2 ore")
+
+    db_session.expire_all()
+    entry = (await db_session.execute(select(ActivityEntry))).scalars().one()
+    assert entry.duration_minutes == 120
 
 
 async def test_answering_the_portion_question_after_a_zero_still_stores(db_session, client, llm):

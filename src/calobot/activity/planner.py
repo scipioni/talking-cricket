@@ -20,7 +20,11 @@ from calobot.persistence.candidates import retrieve_met_candidates
 from calobot.persistence.models import ActivityEntry, Provenance
 from calobot.persistence.timeutil import resolve_when_text, utcnow
 
-DURATION_OPTIONS_MIN = {"15 min": 15, "30 min": 30, "45 min": 45, "60 min": 60}
+# Unlike a food portion, a duration is genuinely the user's to choose and varies far
+# less with the activity, so these stay fixed - but the old 60 min ceiling was wrong
+# for the long, low-intensity activities people actually log (a hike, a bike ride),
+# and pushed them onto the free-text path where "2 ore" used to parse as 2 minutes.
+DURATION_OPTIONS_MIN = {"15 min": 15, "30 min": 30, "45 min": 45, "60 min": 60, "90 min": 90}
 
 # MET values within this ratio of each other are treated as "not materially different",
 # so an unmatched intensity doesn't trigger a clarification when it wouldn't move the number.
@@ -89,7 +93,31 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
 
 
 def _parse_minutes_free_text(text: str) -> float | None:
-    match = re.search(r"(\d+(?:[.,]\d+)?)", text)
+    """A bare number means minutes, but an explicit hour unit has to be honoured:
+    "2 ore" used to parse as 2.0, and 2 is a perfectly real quantity, so a two-hour
+    hike was silently stored as two minutes instead of being re-asked."""
+    lowered = re.sub(r"[’`]", "'", text.strip().lower())
+
+    hours_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ore\b|ora\b|h\b)", lowered)
+    if hours_match:
+        hours: float | None = float(hours_match.group(1).replace(",", "."))
+    elif re.search(r"\bun'?\s*ora\b", lowered):
+        hours = 1.0
+    else:
+        hours = None
+
+    if hours is not None:
+        minutes = hours * 60.0
+        # "un'ora e mezza", "1 ora e 20"
+        trailing = re.search(r"\be\s+(?:(mezz\w*)|(\d+))", lowered)
+        if trailing:
+            minutes += 30.0 if trailing.group(1) else float(trailing.group(2))
+        return minutes
+
+    if re.search(r"\bmezz'?\s*ora\b", lowered):
+        return 30.0
+
+    match = re.search(r"(\d+(?:[.,]\d+)?)", lowered)
     if not match:
         return None
     return float(match.group(1).replace(",", "."))

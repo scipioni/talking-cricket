@@ -74,8 +74,23 @@ def resolve_quantity(item: FoodItemExtraction) -> ResolvedQuantity | None:
     if is_real_quantity(item.quantity_grams):
         return ResolvedQuantity(grams=item.quantity_grams, is_estimated_from_count=False)
 
-    if is_real_quantity(item.quantity_count) and item.count_unit_hint:
-        unit_weight = TYPICAL_UNIT_WEIGHTS_G.get(item.count_unit_hint.strip().lower())
+    if is_real_quantity(item.quantity_count):
+        # The prompt asks for the counted noun in count_unit_hint, but for the most
+        # ordinary phrasing of all - "mangio una pesca" - the model puts it in
+        # description and leaves the hint null, having already said it once. Requiring
+        # the hint sent that straight to the vague-portion question, with "pesca": 150
+        # sitting in the table right here.
+        hint = (item.count_unit_hint or item.description).strip().lower()
+        unit_weight = TYPICAL_UNIT_WEIGHTS_G.get(hint)
+        # The table stays authoritative - it is deterministic, free, and keeps "due
+        # mele" weighing the same for every user on every day. The model's estimate is
+        # consulted only where the table has nothing to say, which is the entire class
+        # of bug the table kept reopening one noun at a time (see above): a stated,
+        # precise count no longer degrades into a vague-portion question just because
+        # a word is missing. The result is still flagged as estimated-from-count and
+        # the assumed weight is stated back to the user either way.
+        if unit_weight is None and is_real_quantity(item.typical_unit_weight_g):
+            unit_weight = item.typical_unit_weight_g
         if unit_weight is not None:
             return ResolvedQuantity(
                 grams=item.quantity_count * unit_weight, is_estimated_from_count=True
@@ -84,10 +99,28 @@ def resolve_quantity(item: FoodItemExtraction) -> ResolvedQuantity | None:
     return None
 
 
-# Offered as tappable options when a portion can't be resolved automatically
-# (specs/message-ingestion - clarification loop offers common answers as buttons).
+# Generic fallback offered as tappable options when a portion can't be resolved
+# automatically and the extraction didn't supply food-specific estimates (e.g. an
+# older draft, or a photo-derived item built without going through extraction).
 PORTION_OPTIONS_G: dict[str, float] = {
     "piccolo (~80g)": 80,
     "medio (~120g)": 120,
     "abbondante (~180g)": 180,
 }
+
+
+def portion_options_for(item: FoodItemExtraction) -> dict[str, float]:
+    """A flat 80/120/180g scale fits a slice of bread as poorly as it fits a plate
+    of pasta. When extraction supplied food-specific estimates alongside a household
+    measure, use those instead of the generic fallback."""
+    if (
+        is_real_quantity(item.portion_small_g)
+        and is_real_quantity(item.portion_medium_g)
+        and is_real_quantity(item.portion_generous_g)
+    ):
+        return {
+            f"piccolo (~{item.portion_small_g:.0f}g)": item.portion_small_g,
+            f"medio (~{item.portion_medium_g:.0f}g)": item.portion_medium_g,
+            f"abbondante (~{item.portion_generous_g:.0f}g)": item.portion_generous_g,
+        }
+    return PORTION_OPTIONS_G

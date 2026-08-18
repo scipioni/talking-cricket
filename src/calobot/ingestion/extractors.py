@@ -23,15 +23,29 @@ Per ogni alimento:
 - description: il nome dell'alimento così come inteso (in italiano)
 - quantity_grams: SOLO se la quantità è esplicitamente data in grammi o millilitri
 - quantity_count: SOLO se la quantità è espressa come un numero di unità
-  numerabili (es. "due mele" -> quantity_count=2, count_unit_hint="mela")
+  numerabili, incluso "un/una/uno" che vale 1 (es. "due mele" -> 2, "una pesca" -> 1)
+- count_unit_hint: SEMPRE quando quantity_count è compilato, il singolare dell'unità
+  effettivamente contata, anche quando ripete description (es. "una pesca" ->
+  "pesca", "2 fette di pane" -> "fetta di pane", "un cucchiaio di olio" -> "cucchiaio")
+- typical_unit_weight_g: SOLO se quantity_count è compilato, il peso tipico in
+  grammi di UNA singola unità di questo alimento (es. "mela" -> 180, "mandorla" -> 1.2)
 - household_measure: SOLO se la quantità è espressa in modo vago/non numerabile
   (es. "un piatto", "una porzione", "un po'") - NON stimare i grammi in questo caso
+- portion_small_g, portion_medium_g, portion_generous_g: SOLO se household_measure è
+  compilato, tre stime in grammi (piccola/media/abbondante) plausibili per QUESTO
+  alimento specifico - una salsa e un piatto di pasta non condividono la stessa scala
+  di porzioni, quindi calibra i valori sul tipo di alimento (es. un condimento va
+  stimato in decine di grammi, un primo piatto in centinaia)
 - preparation: il metodo di preparazione se menzionato (es. "fritto", "bollito",
   "al forno"), altrimenti null
 - preparation_material_but_unstated: true SOLO se il modo di preparazione di questo
   alimento cambia sensibilmente le calorie (es. pollo fritto vs bollito) e non è
   stato specificato; false altrimenti, incluso quando la preparazione non è
   rilevante per le calorie
+- preparation_options: SOLO se preparation_material_but_unstated è true, da 2 a 4
+  preparazioni plausibili PER QUESTO alimento specifico, in italiano e in forma
+  breve (es. per un uovo: ["sodo", "strapazzato", "in camicia", "fritto"]);
+  lista vuota altrimenti
 
 when_text: quando è stato consumato, se indicato (es. "ieri sera"), altrimenti null.
 """

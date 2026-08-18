@@ -29,10 +29,25 @@ The system SHALL resolve quantities expressed in grams, in common household meas
 - **WHEN** a user writes "due mele"
 - **THEN** the system resolves the count to a weight in grams using a typical unit weight and states the assumed weight in its confirmation
 
+#### Scenario: Count of a single item named without a separate unit
+
+- **WHEN** a user writes "mangio una pesca", naming the counted food itself rather than a separate unit such as "fetta" or "cucchiaio"
+- **THEN** the food's own name is used to look up the typical unit weight, and the entry is stored without asking for a portion size
+
+#### Scenario: Count of an item absent from the unit weight table
+
+- **WHEN** a user writes a count of a countable food whose unit weight is not in the bundled table
+- **THEN** the system resolves it using a typical unit weight supplied by the extraction, rather than discarding the stated count and asking for a portion size
+
 #### Scenario: Quantity not resolvable
 
 - **WHEN** a user writes a food with no resolvable quantity
-- **THEN** the system asks for the portion size instead of storing the entry
+- **THEN** the system asks for the portion size instead of storing the entry, offering small/medium/generous gram options scaled to that specific food when the extraction supplied them, or a generic 80/120/180g scale otherwise
+
+#### Scenario: A household measure covers foods of very different typical sizes
+
+- **WHEN** a user writes a vague quantity for a condiment such as "un cucchiaio di maionese"
+- **THEN** the portion options offered reflect plausible gram amounts for a condiment rather than the generic scale meant for a plated dish
 
 ### Requirement: Hybrid energy resolution
 
@@ -88,7 +103,12 @@ The system SHALL take account of a stated preparation method when it materially 
 #### Scenario: Preparation material but unstated
 
 - **WHEN** a food's plausible preparations differ materially in energy and none was stated
-- **THEN** the system asks which preparation was used before storing the entry
+- **THEN** the system asks which preparation was used before storing the entry, offering the preparations that apply to that specific food when the extraction supplied them, and a generic list otherwise
+
+#### Scenario: A food whose preparations are not the generic ones
+
+- **WHEN** the system asks how an egg was prepared
+- **THEN** the options offered describe ways an egg is actually cooked rather than a fixed fry/boil/bake/grill list
 
 ### Requirement: Time of consumption
 

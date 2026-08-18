@@ -5,12 +5,13 @@ finalizes items into stored entries. See specs/food-logging and specs/message-in
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from calobot.food.quantities import PORTION_OPTIONS_G, resolve_quantity
+from calobot.food.quantities import portion_options_for, resolve_quantity
 from calobot.food.resolver import resolve_food_energy
 from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
@@ -18,7 +19,19 @@ from calobot.llm.gateway import LLMGateway
 from calobot.persistence.models import FoodEntry, Provenance
 from calobot.persistence.timeutil import resolve_when_text, utcnow
 
+# Generic fallback, used when extraction supplied no food-specific list. None of the
+# four fits an egg or a plate of pasta, which is why the extraction is asked for the
+# preparations that actually apply to the food in hand.
 PREPARATION_OPTIONS = ["fritto", "bollito", "al forno", "alla griglia"]
+
+
+def preparation_options_for(item: FoodItemExtraction) -> list[str]:
+    """Deciding `preparation_material_but_unstated` already means weighing which
+    preparations of this food differ in energy, so the extraction is asked to name
+    them rather than have that reasoning thrown away and a fixed list offered."""
+    options = [option.strip() for option in item.preparation_options if option.strip()]
+    # One option is not a question - it is an assumption with a button on it.
+    return options if len(options) >= 2 else PREPARATION_OPTIONS
 
 
 @dataclass(frozen=True)
@@ -51,9 +64,14 @@ def _as_extraction_fields(item: dict[str, Any]) -> FoodItemExtraction:
         quantity_grams=item.get("quantity_grams"),
         quantity_count=item.get("quantity_count"),
         count_unit_hint=item.get("count_unit_hint"),
+        typical_unit_weight_g=item.get("typical_unit_weight_g"),
         household_measure=item.get("household_measure"),
+        portion_small_g=item.get("portion_small_g"),
+        portion_medium_g=item.get("portion_medium_g"),
+        portion_generous_g=item.get("portion_generous_g"),
         preparation=item.get("resolved", {}).get("preparation") or item.get("preparation"),
         preparation_material_but_unstated=item.get("preparation_material_but_unstated", False),
+        preparation_options=item.get("preparation_options") or [],
     )
 
 
@@ -69,7 +87,7 @@ async def check_item(
             return ClarificationNeeded(
                 field="portion_grams",
                 question_text=f"Quanto pesava la porzione di {item['description']}?",
-                options=list(PORTION_OPTIONS_G.keys()),
+                options=list(portion_options_for(fields).keys()),
             )
         resolved["portion_grams"] = quantity.grams
         resolved["quantity_is_estimated_from_count"] = quantity.is_estimated_from_count
@@ -79,7 +97,7 @@ async def check_item(
         return ClarificationNeeded(
             field="preparation",
             question_text=f"Come era preparato/a {item['description']}?",
-            options=PREPARATION_OPTIONS,
+            options=preparation_options_for(_as_extraction_fields(item)),
         )
 
     return None
@@ -91,7 +109,7 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
     can't be parsed, so check_item re-asks instead of crashing at finalize time."""
     resolved = dict(item.get("resolved", {}))
     if field == "portion_grams":
-        grams = PORTION_OPTIONS_G.get(raw_answer)
+        grams = portion_options_for(_as_extraction_fields(item)).get(raw_answer)
         if grams is None:
             grams = _parse_grams_free_text(raw_answer)
         # A user can type "0 grammi" as easily as the model can extract it, so the
@@ -107,12 +125,19 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
 
 
 def _parse_grams_free_text(text: str) -> float | None:
-    import re
-
-    match = re.search(r"(\d+(?:[.,]\d+)?)", text)
+    """A bare number means grams, but a stated unit has to be honoured: "1 kg" used
+    to parse as 1.0, and 1 is a real quantity, so it was stored as a one-gram portion
+    rather than re-asked."""
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(kg|kilogramm\w*|chil\w*|hg|ett\w*)?", text.lower())
     if not match:
         return None
-    return float(match.group(1).replace(",", "."))
+    value = float(match.group(1).replace(",", "."))
+    unit = match.group(2)
+    if unit is None:
+        return value
+    if unit.startswith(("kg", "kilo", "chil")):
+        return value * 1000.0
+    return value * 100.0  # hg / etto
 
 
 def resolve_when(when_text: str | None, tz, now: dt.datetime | None = None) -> dt.datetime:
