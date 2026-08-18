@@ -92,6 +92,24 @@ def test_a_count_of_small_countable_items_still_resolves():
     assert resolved is not None and resolved.grams == 10
 
 
+def test_the_plural_form_of_a_countable_item_still_resolves():
+    """Regression test: the extraction prompt asks the model for the singular hint,
+    but it does not reliably comply - "2 noci" as spoken by the user reaches here
+    with count_unit_hint="noci" just as often as the singular "noce", and only the
+    singular used to be in TYPICAL_UNIT_WEIGHTS_G."""
+    resolved = resolve_quantity(_item(quantity_count=2, count_unit_hint="noci"))
+    assert resolved is not None and resolved.grams == 10
+
+
+@pytest.mark.parametrize("hint", ["mandorla", "mandorle"])
+def test_almonds_resolve_in_either_grammatical_number(hint):
+    """Regression test: "3 mandorle" surfaced the generic 80/120/180g portion
+    clarification - sizes meant for a whole fruit, nonsensical for a handful of
+    almonds - because "mandorla" was entirely absent from TYPICAL_UNIT_WEIGHTS_G."""
+    resolved = resolve_quantity(_item(quantity_count=3, count_unit_hint=hint))
+    assert resolved is not None and resolved.grams == pytest.approx(3.6)
+
+
 # -- the clarification answer path ----------------------------------------
 
 
