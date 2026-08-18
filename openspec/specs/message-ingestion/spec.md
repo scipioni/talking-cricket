@@ -8,7 +8,7 @@ Turns an unstructured Italian chat message into a typed, complete and validated 
 
 ### Requirement: Classification of inbound messages
 
-The system SHALL classify every inbound user message that is not a command into exactly one intent: food, weight, activity, correction, report or other. Classification SHALL precede extraction, and extraction SHALL use a schema specific to the classified intent. A message classified as other SHALL NOT result in any claim that data was recorded. Classification SHALL remain a single schema-validated call and SHALL NOT retrieve stored data in order to decide an intent.
+The system SHALL classify every inbound user message that is not a command into exactly one intent: food, weight, activity, profile, correction, report or other. Classification SHALL precede extraction, and extraction SHALL use a schema specific to the classified intent. A message classified as other SHALL NOT result in any claim that data was recorded. Classification SHALL remain a single schema-validated call and SHALL NOT retrieve stored data in order to decide an intent.
 
 #### Scenario: Food message
 
@@ -25,9 +25,19 @@ The system SHALL classify every inbound user message that is not a command into 
 - **WHEN** a user writes "ho fatto una camminata di mezz'ora"
 - **THEN** the message is classified as activity and extracted with the activity schema
 
+#### Scenario: Profile message
+
+- **WHEN** a user writes a statement that sets a profile field, such as "ora il mio peso obiettivo è 74kg"
+- **THEN** the message is classified as profile and extracted with the profile schema, and the change is handled by the user-profile capability
+
+#### Scenario: A body weight statement is not a profile edit
+
+- **WHEN** a user writes a statement of their current body weight, such as "oggi peso 78kg"
+- **THEN** the message is classified as weight rather than profile, because a body weight is a measurement that is logged and not a profile field that is set
+
 #### Scenario: Conversational message
 
-- **WHEN** a user writes something that is neither a log nor a correction nor a report request, such as a greeting or a general nutrition question
+- **WHEN** a user writes something that is neither a log nor a profile change nor a correction nor a report request, such as a greeting or a general nutrition question
 - **THEN** the message is classified as other and handed to the advice-agent capability, which answers it within the safety limits of the user-profile capability, without creating any entry and without claiming that any entry was created
 
 #### Scenario: Question about the user's own data
@@ -184,12 +194,17 @@ The system SHALL indicate that it is working while a message is being processed,
 
 ### Requirement: Only the storing path may confirm a record
 
-The system SHALL NOT state or imply that an entry has been created, amended or deleted unless that entry was created, amended or deleted while handling the message being replied to. A reply produced for the conversational intent SHALL NOT assert that anything was recorded, and this SHALL be enforced after the reply is produced rather than only requested of the language model.
+The system SHALL NOT state or imply that an entry has been created, amended or deleted, or that a profile field has been changed, unless that entry was created, amended or deleted, or that field changed, while handling the message being replied to. A reply produced for the conversational intent SHALL NOT assert that anything was recorded or changed, and this SHALL be enforced after the reply is produced rather than only requested of the language model.
 
 #### Scenario: Conversational reply claims a record was made
 
 - **WHEN** a message is handled as conversation and the generated reply asserts that something was logged
 - **THEN** the system does not send that assertion to the user, and no entry is implied to exist
+
+#### Scenario: Conversational reply claims a profile field was changed
+
+- **WHEN** a message is handled as conversation and the generated reply asserts that a profile field was updated, set or changed
+- **THEN** the system does not send that assertion to the user, and no profile change is implied to have happened
 
 #### Scenario: Conversational reply makes no such claim
 
@@ -200,6 +215,11 @@ The system SHALL NOT state or imply that an entry has been created, amended or d
 
 - **WHEN** an entry is created while handling a message
 - **THEN** the confirmation states what was stored, as it does today, and carries the controls that address that entry
+
+#### Scenario: An applied profile change is confirmed normally
+
+- **WHEN** a profile field is changed while handling a message
+- **THEN** the confirmation states what changed, as the storing path does for an entry
 
 ### Requirement: A message carrying a loggable intent is not conversation
 

@@ -63,6 +63,7 @@ class DraftIntent(enum.StrEnum):
     weight = "weight"
     activity = "activity"
     correction = "correction"
+    profile = "profile"
 
 
 class User(Base):

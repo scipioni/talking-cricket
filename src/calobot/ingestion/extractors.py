@@ -9,6 +9,7 @@ from calobot.ingestion.schemas import (
     ClarificationReplyExtraction,
     CorrectionExtraction,
     FoodExtraction,
+    ProfileEditExtraction,
     ReportExtraction,
     WeightExtraction,
 )
@@ -66,6 +67,21 @@ intensity_text: intensità o ritmo se indicato (es. "svelta", "leggera"), altrim
 when_text: quando è stata svolta, se indicato, altrimenti null.
 """
 
+PROFILE_EDIT_PROMPT = """\
+L'utente sta impostando un dato del proprio profilo (non una misurazione da
+registrare). Identifica quale di questi campi sta impostando:
+- sesso (maschio o femmina)
+- data_nascita (data di nascita o età)
+- altezza_cm (altezza)
+- peso_obiettivo_kg (peso obiettivo, il peso che vuole raggiungere - NON il peso
+  attuale/corporeo, che non è un campo di questo tipo)
+- livello_attivita (livello di attività abituale)
+- ritmo (ritmo desiderato per raggiungere l'obiettivo)
+
+field: il campo tra questi impostato dal messaggio, oppure null se non è chiaro quale.
+value_text: il valore indicato, verbatim (senza interpretarlo), es. "16/5/72", "74kg".
+"""
+
 CORRECTION_PROMPT = """\
 L'utente sta correggendo una voce già registrata. Riporta in correction_text il
 testo verbatim del messaggio, senza interpretarlo.
@@ -95,6 +111,17 @@ async def extract_weight(gateway: LLMGateway, content: MessageContent) -> Weight
 async def extract_activity(gateway: LLMGateway, content: MessageContent) -> ActivityExtraction:
     return await gateway.call_structured(
         step="extract", system_prompt=ACTIVITY_PROMPT, content=content, schema=ActivityExtraction
+    )
+
+
+async def extract_profile_edit(
+    gateway: LLMGateway, content: MessageContent
+) -> ProfileEditExtraction:
+    return await gateway.call_structured(
+        step="extract",
+        system_prompt=PROFILE_EDIT_PROMPT,
+        content=content,
+        schema=ProfileEditExtraction,
     )
 
 

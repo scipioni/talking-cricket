@@ -9,6 +9,7 @@ loop for the 'new message while a draft is open' policy implemented here.
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from calobot.ingestion.classifier import classify
 from calobot.ingestion.extractors import (
     extract_activity,
     extract_food,
+    extract_profile_edit,
     extract_report,
     extract_weight,
 )
@@ -38,7 +40,18 @@ from calobot.photo.classifier import classify_photo
 from calobot.photo.dish import extract_dish, to_food_extraction
 from calobot.photo.label import LabelUnreadable, resolve_from_label
 from calobot.photo.openfoodfacts import ATTRIBUTION, LookupUnavailable, lookup_product
-from calobot.profile.service import current_budget
+from calobot.profile.budget import is_goal_weight_unsafe
+from calobot.profile.onboarding import OPTIONS as PROFILE_OPTIONS
+from calobot.profile.onboarding import QUESTIONS as PROFILE_QUESTIONS
+from calobot.profile.onboarding import parse_field_raw
+from calobot.profile.service import (
+    FIELD_LABELS,
+    GOAL_WEIGHT_UNSAFE_MESSAGE,
+    apply_onboarding_field,
+    current_budget,
+    describe_profile_change,
+    format_field_value,
+)
 from calobot.reporting.aggregation import (
     build_activity_report,
     build_daily_kcal_breakdown,
@@ -57,7 +70,7 @@ PHOTO_NOTICE = (
     "interpretarla, poi la scarto.\n\n"
 )
 
-LOGGABLE_INTENTS = {"food", "weight", "activity", "report", "correction"}
+LOGGABLE_INTENTS = {"food", "weight", "activity", "profile", "report", "correction"}
 
 _QUANTITY_WITH_GRAMS = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:g|gr|grammi)\b")
 _CORRECTION_MARKERS = [
@@ -95,6 +108,17 @@ def _reask_prefix(attempt: int) -> str:
     the rotation runs out (asserted in the tests), and clamping keeps the last, most
     explicit wording if the limit is ever configured higher."""
     return _REASK_PREFIXES[min(attempt, len(_REASK_PREFIXES)) - 1]
+
+
+def _serialize_profile_value(value) -> str:
+    """The draft payload is stored as JSON, which a `dt.date` doesn't round-trip
+    through - so a parsed value is kept in the same string form `parse_field_raw`
+    accepts back, and re-parsed at confirm time rather than stored typed. `isoformat`
+    is one of the formats `parse_data_nascita` already tries, so this recovers the
+    same date; every other field's value is already JSON-safe as a plain str."""
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value)
 
 
 def _single_food_extraction(description: str) -> FoodExtraction:
@@ -169,6 +193,8 @@ class MessagePipeline:
             messages += await self._start_weight(content)
         elif intent == "activity":
             messages += await self._start_activity(content)
+        elif intent == "profile":
+            messages += await self._start_profile_edit(content)
         elif intent == "correction":
             messages += await self._handle_correction(raw_text)
         elif intent == "report":
@@ -395,6 +421,8 @@ class MessagePipeline:
             return await self._handle_weight_confirmation(draft, raw_text)
         if draft.intent == DraftIntent.correction:
             return await self._handle_correction_confirmation(draft, content, raw_text)
+        if draft.intent == DraftIntent.profile:
+            return await self._handle_profile_draft_answer(draft, raw_text)
 
         planner = food_planner if draft.intent == DraftIntent.food else activity_planner
         field = draft.awaiting_field
@@ -599,6 +627,127 @@ class MessagePipeline:
         return [
             OutgoingMessage(
                 text=f"Confermi {item['proposed_kg']:.1f} kg?", buttons=["sì", "no"]
+            )
+        ]
+
+    # -- profile ------------------------------------------------------------
+
+    async def _start_profile_edit(self, content: MessageContent) -> list[OutgoingMessage]:
+        extraction = await extract_profile_edit(self.gateway, content)
+        if extraction.field is None:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Quale dato del profilo vuoi cambiare, e a quale valore? Per "
+                        'esempio: "la mia data di nascita è 16/5/1972".'
+                    )
+                )
+            ]
+        return await self._propose_profile_field_value(extraction.field, extraction.value_text)
+
+    async def _propose_profile_field_value(
+        self, field: str, value_text: str, draft=None
+    ) -> list[OutgoingMessage]:
+        """Parses a stated value for `field` deterministically (design.md - Extraction
+        names the field and quotes the value; parsing stays deterministic) and either
+        proposes the change for confirmation, or - if it can't be parsed - asks again,
+        bounded by clarification_attempt_limit like any other clarification.
+
+        `draft` is the open draft when this is a retry after an unparseable answer;
+        None on the first attempt, straight from extraction."""
+        value, error = parse_field_raw(field, value_text)
+
+        if value is None:
+            if draft is None:
+                draft = await drafts.create_draft(
+                    self.session,
+                    self.user.id,
+                    DraftIntent.profile,
+                    [{"field": field, "resolved": {}}],
+                )
+                await drafts.set_awaiting_field(self.session, draft, "value")
+                return [
+                    OutgoingMessage(
+                        text=error or PROFILE_QUESTIONS[field],
+                        buttons=[*PROFILE_OPTIONS.get(field, []), ABANDON_OPTION],
+                    )
+                ]
+
+            attempt = await drafts.record_failed_attempt(self.session, draft)
+            if attempt >= self.settings.clarification_attempt_limit:
+                await drafts.discard_draft(self.session, self.user.id)
+                return [
+                    OutgoingMessage(
+                        text=(
+                            f"Lasciamo perdere: non ho cambiato {FIELD_LABELS[field]}, "
+                            "perché non sono riuscito a capire il valore. Riscrivimelo "
+                            "quando vuoi."
+                        )
+                    )
+                ]
+            text = error or PROFILE_QUESTIONS[field]
+            return [
+                OutgoingMessage(
+                    text=f"{_reask_prefix(attempt)} {text}",
+                    buttons=[*PROFILE_OPTIONS.get(field, []), ABANDON_OPTION],
+                )
+            ]
+
+        # Checked before asking for confirmation, so an edit that will be refused is
+        # never confirmed first (design.md - safety limit cannot hold on one path and
+        # not the other; apply_onboarding_field enforces the same check again at
+        # apply time as the actual guard).
+        if (
+            field == "peso_obiettivo_kg"
+            and self.user.altezza_cm is not None
+            and is_goal_weight_unsafe(value, self.user.altezza_cm)
+        ):
+            if draft is not None:
+                await drafts.discard_draft(self.session, self.user.id)
+            return [OutgoingMessage(text=GOAL_WEIGHT_UNSAFE_MESSAGE)]
+
+        description = await describe_profile_change(self.session, self.user, field, value)
+        confirm_draft = await drafts.create_draft(
+            self.session,
+            self.user.id,
+            DraftIntent.profile,
+            [{"field": field, "value_text": _serialize_profile_value(value), "resolved": {}}],
+        )
+        await drafts.set_awaiting_field(self.session, confirm_draft, "confirm")
+        return [OutgoingMessage(text=f"{description}\nConfermi?", buttons=["sì", "no"])]
+
+    async def _handle_profile_draft_answer(self, draft, raw_text: str) -> list[OutgoingMessage]:
+        item = drafts.current_item(draft)
+        if raw_text.strip() == ABANDON_OPTION:
+            await drafts.discard_draft(self.session, self.user.id)
+            return [OutgoingMessage(text="Va bene, non ho cambiato nulla.")]
+        if draft.awaiting_field == "confirm":
+            return await self._handle_profile_confirm_answer(draft, item, raw_text)
+        return await self._propose_profile_field_value(item["field"], raw_text, draft=draft)
+
+    async def _handle_profile_confirm_answer(
+        self, draft, item: dict, raw_text: str
+    ) -> list[OutgoingMessage]:
+        answer = raw_text.strip().lower()
+        field = item["field"]
+        if answer in ("sì", "si", "yes", "ok", "conferma"):
+            value, _ = parse_field_raw(field, item["value_text"])
+            error = await apply_onboarding_field(self.session, self.user, field, value)
+            await drafts.discard_draft(self.session, self.user.id)
+            if error:
+                return [OutgoingMessage(text=error)]
+            return [
+                OutgoingMessage(
+                    text=f"Fatto: {FIELD_LABELS[field]} aggiornato a "
+                    f"{format_field_value(field, value)}."
+                )
+            ]
+        if answer == "no":
+            await drafts.discard_draft(self.session, self.user.id)
+            return [OutgoingMessage(text="Ok, non ho cambiato nulla.")]
+        return [
+            OutgoingMessage(
+                text=f"Confermi la modifica a {FIELD_LABELS[field]}?", buttons=["sì", "no"]
             )
         ]
 

@@ -43,10 +43,11 @@ class Violation:
 # agent (specs/advice-agent - a false claim of deletion is the same failure as a
 # false claim of creation), so this independent detector keeps covering the same
 # concept the production one does, even though the two remain separately
-# implemented.
+# implemented. Profile-edit stems (aggiornat/impostat/cambiat) were added the same
+# way, independently, for the conversational profile-edit path.
 _NEGATED_CLAIM = re.compile(
     r"non\s+(?:l['’]ho|ho|le\s+ho|li\s+ho)\s+\w*"
-    r"(?:registrat|salvat|eliminat|cancellat|modificat)\w*"
+    r"(?:registrat|salvat|eliminat|cancellat|modificat|aggiornat|impostat|cambiat)\w*"
 )
 # A whole interrogative sentence, removed before anything else is looked at: a
 # question about a record is not a claim of one. A live run flagged the correction
@@ -54,7 +55,8 @@ _NEGATED_CLAIM = re.compile(
 # participle describes an existing entry rather than asserting a new one.
 _QUESTION = re.compile(r"[^.!?\n]*\?")
 _CLAIM = re.compile(
-    r"\b(?:ho\s+)?(?:registrat|salvat|memorizzat|aggiunt|eliminat|cancellat|modificat|rimoss)\w*\b"
+    r"\b(?:ho\s+)?(?:registrat|salvat|memorizzat|aggiunt|eliminat|cancellat|modificat|rimoss"
+    r"|aggiornat|impostat|cambiat)\w*\b"
 )
 
 

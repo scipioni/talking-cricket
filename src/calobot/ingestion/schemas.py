@@ -8,7 +8,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Intent = Literal["food", "weight", "activity", "correction", "report", "other"]
+Intent = Literal["food", "weight", "activity", "profile", "correction", "report", "other"]
+
+# Every onboarding field except peso_attuale_kg, which is not a profile field on this
+# path - it writes a WeightEntry and stays with the weight intent (design.md - Current
+# weight is not settable on this path).
+ProfileField = Literal[
+    "sesso", "data_nascita", "altezza_cm", "peso_obiettivo_kg", "livello_attivita", "ritmo"
+]
 
 
 class Classification(BaseModel):
@@ -66,6 +73,18 @@ class ActivityExtraction(BaseModel):
     duration_minutes: float | None = Field(default=None, ge=0, le=1440)
     intensity_text: str | None = None
     when_text: str | None = None
+
+
+class ProfileEditExtraction(BaseModel):
+    """Names the field being set and quotes the value verbatim; interpreting the
+    value stays with the deterministic per-field parser onboarding already uses
+    (design.md - Extraction names the field and quotes the value)."""
+
+    field: ProfileField | None = Field(
+        default=None,
+        description="The profile field being set, or null if none is clearly named.",
+    )
+    value_text: str = ""  # verbatim as stated, e.g. "16/5/72", "74kg", "sedentario"
 
 
 class CorrectionExtraction(BaseModel):

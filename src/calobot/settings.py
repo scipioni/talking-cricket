@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    web_port: int = 8080
+    web_port: int = 8083
 
     # Bounded resolution photos are downscaled to before inference (design.md -
     # image inference is much more expensive than text, so size is the main lever).

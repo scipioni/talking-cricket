@@ -89,7 +89,10 @@ HELP_TEXT = (
     "/help - mostra questo messaggio\n\n"
     "Per registrare cibo, peso e attività, o chiedere un report, scrivimi "
     "semplicemente in chat (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
-    "\"report settimanale\")."
+    "\"report settimanale\").\n\n"
+    "Per correggere un dato del tuo profilo, scrivimelo direttamente (es. \"la mia "
+    "data di nascita è 16/5/1990\", \"ora il mio peso obiettivo è 74kg\") - te lo "
+    "chiedo prima di applicarlo."
 )
 
 

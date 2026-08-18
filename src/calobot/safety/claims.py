@@ -35,6 +35,13 @@ _RECORDED_STEMS = (
     "cancellat",
     "modificat",
     "rimoss",
+    # A profile edit uses a different verb family from the diary - these were added
+    # for the conversational profile-edit path (specs/message-ingestion - Only the
+    # storing path may confirm a record), and until now passed through unrecognised:
+    # the bot could already claim to have updated a goal it never touched.
+    "aggiornat",
+    "impostat",
+    "cambiat",
 )
 
 _NEGATIONS = ("non", "nessun", "nessuna", "niente", "nulla", "senza")

@@ -78,6 +78,12 @@ async def next_onboarding_question(session: AsyncSession, user: User) -> str | N
     return first_missing_field(known, has_weight)
 
 
+GOAL_WEIGHT_UNSAFE_MESSAGE = (
+    "Questo obiettivo di peso risulterebbe in un indice di massa corporea "
+    "sotto i livelli di sicurezza (18.5). Puoi indicarmi un peso obiettivo diverso?"
+)
+
+
 async def apply_onboarding_field(
     session: AsyncSession, user: User, field: str, value
 ) -> str | None:
@@ -104,10 +110,7 @@ async def apply_onboarding_field(
             session.add(WeightEntry(user_id=user.id, kg=value, day=day))
     elif field == "peso_obiettivo_kg":
         if user.altezza_cm is not None and is_goal_weight_unsafe(value, user.altezza_cm):
-            return (
-                "Questo obiettivo di peso risulterebbe in un indice di massa corporea "
-                "sotto i livelli di sicurezza (18.5). Puoi indicarmi un peso obiettivo diverso?"
-            )
+            return GOAL_WEIGHT_UNSAFE_MESSAGE
         user.peso_obiettivo_kg = value
     elif field == "livello_attivita":
         session.add(
@@ -136,28 +139,124 @@ async def maybe_complete_onboarding(session: AsyncSession, user: User) -> bool:
     return True
 
 
-async def current_budget(session: AsyncSession, user: User) -> BudgetResult | None:
+async def _budget_inputs(
+    session: AsyncSession,
+    user: User,
+    override_field: str | None = None,
+    override_value: Any = None,
+) -> dict[str, Any] | None:
+    """Resolves every input `compute_budget` needs, substituting one profile field's
+    stated value for the stored one when `override_field` names it. Shared by
+    `current_budget` and `budget_with_override` so the two can never disagree about
+    what "the rest of the profile" is while one field is hypothetical."""
     weight = await get_latest_weight(session, user.id)
     activity = await get_current_activity_level(session, user.id)
+
+    sesso = Sesso(override_value) if override_field == "sesso" else user.sesso
+    data_nascita = override_value if override_field == "data_nascita" else user.data_nascita
+    altezza_cm = override_value if override_field == "altezza_cm" else user.altezza_cm
+    peso_obiettivo_kg = (
+        override_value if override_field == "peso_obiettivo_kg" else user.peso_obiettivo_kg
+    )
+    livello_attivita = (
+        LivelloAttivita(override_value)
+        if override_field == "livello_attivita"
+        else (activity.livello if activity else None)
+    )
+    ritmo = Ritmo(override_value) if override_field == "ritmo" else user.ritmo
+    current_weight_kg = weight.kg if weight else None
+
     if not (
-        user.sesso
-        and user.data_nascita
-        and user.altezza_cm
-        and weight
-        and user.peso_obiettivo_kg
-        and activity
-        and user.ritmo
+        sesso
+        and data_nascita
+        and altezza_cm
+        and current_weight_kg
+        and peso_obiettivo_kg
+        and livello_attivita
+        and ritmo
     ):
         return None
-    return compute_budget(
-        sesso=user.sesso,
-        data_nascita=user.data_nascita,
-        height_cm=user.altezza_cm,
-        current_weight_kg=weight.kg,
-        goal_weight_kg=user.peso_obiettivo_kg,
-        activity_level=activity.livello,
-        ritmo=user.ritmo,
-    )
+    return {
+        "sesso": sesso,
+        "data_nascita": data_nascita,
+        "height_cm": altezza_cm,
+        "current_weight_kg": current_weight_kg,
+        "goal_weight_kg": peso_obiettivo_kg,
+        "activity_level": livello_attivita,
+        "ritmo": ritmo,
+    }
+
+
+async def current_budget(session: AsyncSession, user: User) -> BudgetResult | None:
+    inputs = await _budget_inputs(session, user)
+    return compute_budget(**inputs) if inputs else None
+
+
+async def budget_with_override(
+    session: AsyncSession, user: User, field: str, value: Any
+) -> BudgetResult | None:
+    """As `current_budget`, but with one profile field's proposed value substituted
+    before computing - lets a confirmation preview the budget effect of a change
+    before it is applied, without writing anything."""
+    inputs = await _budget_inputs(session, user, field, value)
+    return compute_budget(**inputs) if inputs else None
+
+
+# Field labels and value formatting for the conversational profile-edit confirmation
+# (specs/user-profile - Changing a field in conversation). peso_attuale_kg is
+# deliberately absent: it is not a profile field on this path, it is a WeightEntry
+# already handled by the weight intent.
+FIELD_LABELS: dict[str, str] = {
+    "sesso": "sesso",
+    "data_nascita": "data di nascita",
+    "altezza_cm": "altezza",
+    "peso_obiettivo_kg": "peso obiettivo",
+    "livello_attivita": "livello di attività",
+    "ritmo": "ritmo",
+}
+
+
+def format_field_value(field: str, value: Any) -> str:
+    if field == "data_nascita":
+        return value.isoformat()
+    if field == "altezza_cm":
+        return f"{value:g} cm"
+    if field == "peso_obiettivo_kg":
+        return f"{value:g} kg"
+    return str(value)
+
+
+async def current_field_value(session: AsyncSession, user: User, field: str) -> Any | None:
+    """The field's current value, in the same plain form `parse_field_raw` returns -
+    a Sesso/Ritmo column reads back as its string value, not the enum member."""
+    if field == "livello_attivita":
+        activity = await get_current_activity_level(session, user.id)
+        return activity.livello.value if activity else None
+    value = getattr(user, field)
+    return value.value if hasattr(value, "value") else value
+
+
+async def describe_profile_change(
+    session: AsyncSession, user: User, field: str, value: Any
+) -> str:
+    """The confirmation text for a proposed profile field change: what it currently
+    holds, what it would become, and the resulting change to the daily budget -
+    the part of the change a user actually experiences."""
+    current = await current_field_value(session, user, field)
+    current_display = format_field_value(field, current) if current is not None else "non impostato"
+    new_display = format_field_value(field, value)
+    lines = [f"Aggiorno {FIELD_LABELS[field]}: {new_display} (prima: {current_display})."]
+
+    old_budget = await current_budget(session, user)
+    new_budget = await budget_with_override(session, user, field, value)
+    if old_budget is not None and new_budget is not None:
+        delta = new_budget.target_kcal - old_budget.target_kcal
+        if abs(delta) >= 1:
+            lines.append(
+                f"Il budget passa da {old_budget.target_kcal:.0f} a "
+                f"{new_budget.target_kcal:.0f} kcal."
+            )
+    return "\n".join(lines)
 
 
 async def format_profile_summary(session: AsyncSession, user: User) -> str:

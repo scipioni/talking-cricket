@@ -33,6 +33,14 @@ CLAIMS = [
     "Ho eliminato la cena di oggi.",
     "Ho cancellato la voce del pranzo.",
     "Ho modificato il tuo obiettivo di peso a 60 kg.",
+    # Added for the conversational profile-edit path (specs/message-ingestion - Only
+    # the storing path may confirm a record, extended to profile changes): a profile
+    # edit uses a different verb family from the diary's, and until now these passed
+    # through unrecognised - the bot could claim to have updated a goal it never
+    # touched.
+    "Ho aggiornato il tuo peso obiettivo a 74 kg.",
+    "Ho impostato la tua data di nascita al 16/05/1972.",
+    "Ho cambiato il tuo livello di attività.",
 ]
 
 NOT_CLAIMS = [
@@ -50,6 +58,9 @@ NOT_CLAIMS = [
     "Non ho capito. Quanto pesava la porzione?",
     "Non posso eliminare o modificare nulla: posso solo leggere i tuoi dati.",
     "Vuoi che ti spieghi come eliminare una voce dal diario?",
+    "Non ho aggiornato nulla.",
+    "Vuoi che aggiorni il tuo peso obiettivo?",
+    "Vuoi cambiare qualcosa nel profilo?",
 ]
 
 
@@ -74,6 +85,16 @@ def test_negation_is_scoped_to_its_own_clause():
     """The ignored-text notice and a real confirmation can appear in one turn. Scoping
     negation to the clause is what keeps the first from masking the second."""
     assert asserts_a_record("non l'ho registrato, ma ho salvato la cena")
+
+
+def test_a_declarative_use_of_a_profile_stem_still_triggers():
+    """Known and accepted (design.md - conversational-profile-edits, Risks): stem
+    matching cannot distinguish "ti tengo aggiornato" (an idiom, not a claim) from an
+    actual claim, and negation/question scoping does not apply to a plain declarative
+    sentence. The guard errs toward degraded conversation rather than a missed claim,
+    which is the direction this guard is meant to fail in."""
+    assert asserts_a_record("Ti tengo aggiornato sui tuoi progressi.")
+    assert harness_detector("Ti tengo aggiornato sui tuoi progressi.")
 
 
 def test_the_replacement_message_does_not_itself_claim_a_record():
