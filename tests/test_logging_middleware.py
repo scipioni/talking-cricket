@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from aiogram.methods import AnswerCallbackQuery, SendMessage, SendPhoto
+import pytest
+from aiogram.methods import AnswerCallbackQuery, GetUpdates, SendMessage, SendPhoto
 from aiogram.types import Chat, Message, Update, User
 
 from calobot.telegram.logging_middleware import (
@@ -103,3 +104,34 @@ async def test_outgoing_middleware_handles_methods_without_chat_id(caplog):
         await middleware(make_request, bot=None, method=method)
 
     assert "method=answerCallbackQuery" in caplog.text
+
+
+async def test_outgoing_middleware_does_not_log_a_successful_poll(caplog):
+    """getUpdates is long polling's own request, reissued continuously with nothing
+    chat-specific to say - logging it on every successful poll is pure noise."""
+    middleware = OutgoingLoggingMiddleware()
+    method = GetUpdates()
+
+    async def make_request(bot, method):
+        return []
+
+    with caplog.at_level(logging.INFO, logger="calobot.telegram.messages"):
+        result = await middleware(make_request, bot=None, method=method)
+
+    assert result == []
+    assert caplog.text == ""
+
+
+async def test_outgoing_middleware_logs_a_failed_poll(caplog):
+    middleware = OutgoingLoggingMiddleware()
+    method = GetUpdates()
+
+    async def make_request(bot, method):
+        raise RuntimeError("network unreachable")
+
+    with caplog.at_level(logging.INFO, logger="calobot.telegram.messages"):
+        with pytest.raises(RuntimeError, match="network unreachable"):
+            await middleware(make_request, bot=None, method=method)
+
+    assert "method=getUpdates" in caplog.text
+    assert "failed" in caplog.text

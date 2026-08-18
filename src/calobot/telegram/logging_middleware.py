@@ -119,7 +119,14 @@ class OutgoingLoggingMiddleware(BaseRequestMiddleware):
         bot: Bot,
         method: TelegramMethod[TelegramType],
     ) -> Any:
-        self._log_request(method)
+        api_method = getattr(method, "__api_method__", type(method).__name__)
+        # getUpdates is long polling's own request, reissued continuously with
+        # nothing chat-specific to say (chat=None every time) - logging it at INFO on
+        # every successful poll is pure noise. Only a failed poll is worth logging.
+        is_poll = api_method == "getUpdates"
+
+        if not is_poll:
+            self._log_request(method)
 
         chat_id = getattr(method, "chat_id", None)
         try:
@@ -160,7 +167,12 @@ class OutgoingLoggingMiddleware(BaseRequestMiddleware):
             }
             event_bus.publish(payload)
 
-        return await make_request(bot, method)
+        try:
+            return await make_request(bot, method)
+        except Exception:
+            if is_poll:
+                logger.warning("OUT method=%s chat=%s failed", api_method, chat_id, exc_info=True)
+            raise
 
     @staticmethod
     def _log_request(method: TelegramMethod[Any]) -> None:
