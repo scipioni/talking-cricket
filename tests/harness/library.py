@@ -96,6 +96,19 @@ def marco_three_days(persona: Persona = HOSTILE) -> Scenario:
                 behaviour="straight",
                 at=day_one.replace(hour=18, minute=0),
             ),
+            # A generic practical question that needs none of his data (calibrated
+            # after a live run found the advice agent declining this exact question
+            # with "non ho accesso ai tuoi dati" instead of just answering it - the
+            # narration prompt's numeric-grounding framing was swallowing its own
+            # "answer normally" carve-out for questions like this one). NothingStored
+            # is the only automatable check; a real, useful answer is what the live
+            # run is for.
+            Step(
+                intent="chiedere quando è meglio pesarsi",
+                expect=NothingStored(),
+                behaviour="straight",
+                at=day_one.replace(hour=18, minute=5),
+            ),
             # -- day two ---------------------------------------------------
             Step(
                 intent="dire che hai mangiato un piatto di riso, senza dire quanto",
