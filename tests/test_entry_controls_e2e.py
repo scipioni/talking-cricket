@@ -162,3 +162,23 @@ async def test_reply_corrects_activity_description(db_session, client, llm):
     assert entry is not None
     assert entry.activity == "corsa"
     assert entry.met == 8.0
+
+
+async def test_reply_to_modify_prompt_corrects_the_entry(db_session, client, llm):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    confirmation = await _log(client, llm, "riso", 100)
+
+    # Tap "✏️ modifica" to get the prompt message
+    prompt_msgs = await client.tap("✏️ modifica", on=confirmation)
+    prompt_msg = prompt_msgs[-1]
+
+    # Reply to the prompt message
+    sent = await client.reply_to(prompt_msg, "no erano 20g")
+
+    assert "Corretto" in sent[-1].text
+
+    entries = await _entries(db_session)
+    assert entries[0].grams == 20
+

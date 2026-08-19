@@ -495,8 +495,10 @@ async def on_entry_control_callback(callback: CallbackQuery, bot: Bot, settings:
                 example = "no erano 77.5kg"
             else:
                 example = "no erano 20g"
-            await bot.send_message(
+            sent = await bot.send_message(
                 chat_id,
                 "Rispondi a questo messaggio (o al messaggio della voce) con la correzione, "
                 f"es. '{example}'.",
             )
+            await set_confirmation_message_id(session, kind, entry_id, sent.message_id)
+            await session.commit()
