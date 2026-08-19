@@ -1,6 +1,6 @@
 [project]
 name = "calobot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Telegram virtual nutritionist bot: LLM-parsed food, weight and activity tracking with charts"
 readme = "README.md"
 authors = [
