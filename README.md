@@ -85,9 +85,11 @@ Dopo una foto, il Grillo chiede sempre le quantità con **pulsanti rapidi**.
 | Comando | Descrizione |
 |---------|-------------|
 | `/start` | Avvia o riprendi la conversazione |
-| `/profilo` | Mostra il tuo profilo e budget calorico |
+| `/profilo` | Mostra il tuo profilo, budget calorico e stato memoria |
 | `/annulla` | Cancella l'ultimo entry registrato |
 | `/cancellami` | Elimina tutti i tuoi dati (irreversibile) |
+| `/memory_off` | Attiva modalità nessuna ritenzione (per testare senza salvare dati) |
+| `/memory_on` | Riattiva la modalità normale di memorizzazione |
 | `/help` | Lista dei comandi disponibili |
 
 ## FAQ

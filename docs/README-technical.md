@@ -221,6 +221,23 @@ example, and how to add a tool, and
 `openspec/changes/archive/2026-08-17-calobot-advice-agent/` for the full design and
 the requirements each of these behaviours traces to.
 
+## Advanced Logging & Development Features
+
+### JSONL Interaction Logger
+A structured JSONL turn-level interaction logger is available to capture and record the complete history of all user chats, outbound bot replies, and gateway LLM transactions.
+* **Format:** Every logical user interaction (the entire message turn, including all intermediate steps, prompts, retries, and API calls) is compiled and serialized as exactly **one row** of structured JSON data.
+* **Performance:** Writing to the log file is fully asynchronous and offloaded to a non-blocking background thread pool (`asyncio.to_thread`) to prevent blocking the asyncio event loop.
+* **Configuration:**
+  * `CALOBOT_JSONL_LOG_ENABLED` (boolean, defaults to `True`): Toggles the JSONL interaction logger.
+  * `CALOBOT_JSONL_LOG_PATH` (string, defaults to `/data/interactions.jsonl`): Sets the destination path for the JSONL file.
+
+### Persistent No-Retention Testing Mode
+To allow testing and live demonstrations of the bot's full pipeline without modifying or polluting the database:
+* **Toggles:** Toggled per-chat using the `/memory_off` and `/memory_on` Telegram commands.
+* **Transaction Rollback:** When active, the bot processes all inputs normally, but overrides the underlying SQLAlchemy session commits (`NonRetentiveAsyncSession.commit()`) to bypass permanent serialization.
+* **Persistent Chat IDs Set:** The set of chat IDs with memory turned off is serialized to `/data/no_retention_chats.json` adjacent to the SQL database, ensuring no-retention status survives restarts and process reboots without requiring any database schema alterations.
+* **In-Memory Drafts:** Since database transactions are rolled back, standard database-based `PendingDraft` FSM envelopes would also be lost, breaking multi-turn clarification prompts. To keep multi-turn conversations working perfectly, an in-memory draft registry (`InMemoryPendingDraft`) safely handles and preserves active draft contexts for no-retention chats.
+
 ## What's deliberately not here yet
 
 Free-text corrections of historical entries and automatic recalibration of the
