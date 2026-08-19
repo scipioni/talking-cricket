@@ -446,3 +446,76 @@ async def test_advice_path_creates_and_mutates_nothing(db_session, run, monkeypa
     refreshed = await db_session.get(type(user), user_id)
     assert refreshed.peso_obiettivo_kg == goal_before
     run.assert_clean()
+
+
+# -- 7.16 metabolic and cardiovascular questions are refused with no model call ---
+
+
+async def test_cardiovascular_question_is_refused_with_no_model_call(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+
+    sent = await run.say("ho il colesterolo alto, cosa posso mangiare?")
+
+    assert sent[-1].text == REFUSAL_TEXT
+    assert len(llm.calls) == 1  # only the classification call
+    run.assert_clean()
+
+
+# -- 7.17 recipe suggestions within budget are returned ----------------------------
+
+
+async def test_recipe_suggestion_within_budget(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+    llm.push_agent_turn(
+        [[ToolCall(name="get_profile_and_budget", arguments={})]],
+        final={
+            "answer_text": "Oggi ti rimangono 400 kcal. Ti consiglio del pollo alla piastra con verdure.",
+            "used_data": True,
+            "declined_reason": None,
+        },
+    )
+
+    sent = await run.say("cosa posso mangiare stasera?")
+
+    assert "400" in sent[-1].text
+    assert "pollo" in sent[-1].text
+    offered_names = [tc["function"]["name"] for tc in llm.calls[1]["tools"]]
+    assert "get_profile_and_budget" in offered_names
+    run.assert_clean()
+
+
+# -- 7.18 recipe suggestion when over budget provides empathetic counseling --------
+
+
+async def test_recipe_suggestion_when_over_budget_provides_empathetic_counseling(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+    llm.push_agent_turn(
+        [[ToolCall(name="get_profile_and_budget", arguments={})]],
+        final={
+            "answer_text": "Oggi hai già superato il tuo budget di 150 kcal. Non ti preoccupare, succede! Non saltare la cena, ti consiglio qualcosa di leggerissimo come un brodo caldo o finocchi freschi.",
+            "used_data": True,
+            "declined_reason": None,
+        },
+    )
+
+    sent = await run.say("sono fuori budget, cosa posso mangiare stasera?")
+
+    assert "superato" in sent[-1].text
+    assert "150" in sent[-1].text
+    assert "brodo" in sent[-1].text
+    offered_names = [tc["function"]["name"] for tc in llm.calls[1]["tools"]]
+    assert "get_profile_and_budget" in offered_names
+    run.assert_clean()
+

@@ -25,6 +25,10 @@ MEDICAL_KEYWORDS = [
     "diabete",
     "gravidanza",
     "incinta",
+    "colesterolo",
+    "pressione",
+    "ipertensione",
+    "ipercolesterolemia",
 ]
 
 REFUSAL_TEXT = (

@@ -12,6 +12,10 @@ from calobot.settings import Settings
 def test_medical_keywords_detected():
     assert is_medical_topic("ho il diabete, cosa posso mangiare?")
     assert is_medical_topic("che farmaco devo prendere?")
+    assert is_medical_topic("ho il colesterolo alto")
+    assert is_medical_topic("consigli per la pressione alta")
+    assert is_medical_topic("ho l'ipertensione")
+    assert is_medical_topic("soffro di ipercolesterolemia")
     assert not is_medical_topic("ciao come stai")
 
 
