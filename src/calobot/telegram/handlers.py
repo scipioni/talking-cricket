@@ -259,9 +259,10 @@ async def on_help(message: Message) -> None:
 
 @router.message(Command("memory_off"))
 async def on_memory_off(message: Message) -> None:
-    from calobot.telemetry.context import no_retention_chats
+    from calobot.telemetry.context import no_retention_chats, save_no_retention_chats
     chat_id = message.chat.id
     no_retention_chats.add(chat_id)
+    save_no_retention_chats()
     await message.answer(
         "Modalità \"nessuna ritenzione\" attivata. Le tue prossime azioni "
         "non verranno salvate nel database. Usa /memory_on per tornare alla "
@@ -271,9 +272,10 @@ async def on_memory_off(message: Message) -> None:
 
 @router.message(Command("memory_on"))
 async def on_memory_on(message: Message) -> None:
-    from calobot.telemetry.context import no_retention_chats
+    from calobot.telemetry.context import no_retention_chats, save_no_retention_chats
     chat_id = message.chat.id
     no_retention_chats.discard(chat_id)
+    save_no_retention_chats()
     await message.answer(
         "Modalità normale riattivata. Le tue prossime azioni verranno "
         "regolarmente salvate nel database."

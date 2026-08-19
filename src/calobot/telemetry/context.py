@@ -10,6 +10,7 @@ import contextvars
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 # Context variable tracking the active chat_id (int)
@@ -28,6 +29,44 @@ active_no_retention: contextvars.ContextVar[bool] = contextvars.ContextVar("acti
 
 # In-memory global set of chat_ids currently in no-retention mode
 no_retention_chats: set[int] = set()
+
+
+def _get_persistence_path() -> Path:
+    from calobot.settings import get_settings
+
+    settings = get_settings()
+    return Path(settings.database_path).resolve().parent / "no_retention_chats.json"
+
+
+def load_no_retention_chats() -> None:
+    """Load persistent no-retention chats from the JSON file on startup."""
+    path = _get_persistence_path()
+    if path.exists():
+        import json
+        import logging
+
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                chat_ids = json.load(f)
+                if isinstance(chat_ids, list):
+                    no_retention_chats.clear()
+                    no_retention_chats.update(chat_ids)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Failed to load no_retention_chats: %s", exc)
+
+
+def save_no_retention_chats() -> None:
+    """Save the current set of no-retention chats to the persistent JSON file."""
+    path = _get_persistence_path()
+    import json
+    import logging
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(list(no_retention_chats), f)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Failed to save no_retention_chats: %s", exc)
 
 
 @contextmanager

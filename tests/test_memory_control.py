@@ -5,10 +5,15 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def clean_no_retention():
-    from calobot.telemetry.context import no_retention_chats
+    from calobot.telemetry.context import _get_persistence_path, no_retention_chats
     no_retention_chats.clear()
+    path = _get_persistence_path()
+    if path.exists():
+        path.unlink()
     yield
     no_retention_chats.clear()
+    if path.exists():
+        path.unlink()
 
 
 async def test_help_lists_memory_commands(client):
@@ -70,3 +75,35 @@ async def test_profile_command_shows_memory_status(client):
     await client.say("/memory_off")
     replies_off = await client.say("/profilo")
     assert "Stato memoria: OFF" in replies_off[0].text
+
+
+async def test_no_retention_persistence_survives_reloads(client):
+    from calobot.telemetry.context import (
+        _get_persistence_path,
+        load_no_retention_chats,
+        no_retention_chats,
+    )
+
+    path = _get_persistence_path()
+    assert not path.exists()
+
+    # 1. Activate no retention mode
+    await client.say("/memory_off")
+    assert client.chat_id in no_retention_chats
+    assert path.exists()
+
+    # 2. Simulate process restart by clearing the in-memory set and reloading from file
+    no_retention_chats.clear()
+    assert client.chat_id not in no_retention_chats
+
+    load_no_retention_chats()
+    assert client.chat_id in no_retention_chats
+
+    # 3. Deactivate no retention mode (turn memory back on)
+    await client.say("/memory_on")
+    assert client.chat_id not in no_retention_chats
+
+    # 4. Simulate process restart again (should load empty list/no-retention off)
+    no_retention_chats.add(client.chat_id)  # Add dummy
+    load_no_retention_chats()
+    assert client.chat_id not in no_retention_chats

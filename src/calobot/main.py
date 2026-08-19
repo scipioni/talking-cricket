@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 async def _async_main(settings: Settings) -> None:
     init_engine(settings.database_url)
 
+    logger.info("loading persistent no-retention chats")
+    from calobot.telemetry.context import load_no_retention_chats
+
+    load_no_retention_chats()
+
     logger.info("seeding bundled datasets")
     session_factory = get_session_factory()
     async with session_factory() as session:
