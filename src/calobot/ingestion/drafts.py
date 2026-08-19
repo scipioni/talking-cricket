@@ -20,7 +20,24 @@ from calobot.persistence.models import DraftIntent, PendingDraft
 from calobot.persistence.timeutil import utcnow
 
 
+class InMemoryPendingDraft(PendingDraft):
+    def __init__(self, user_id: int, intent: DraftIntent, payload: dict[str, Any]):
+        self.user_id = user_id
+        self.intent = intent
+        self.payload = payload
+        self.awaiting_field: str | None = None
+        self.updated_at: dt.datetime = dt.datetime.now(dt.UTC)
+
+
+no_retention_drafts: dict[int, InMemoryPendingDraft] = {}
+
+
 async def get_open_draft(session: AsyncSession, user_id: int) -> PendingDraft | None:
+    from calobot.telemetry.context import active_no_retention
+
+    if active_no_retention.get(False):
+        return no_retention_drafts.get(user_id)
+
     result = await session.execute(select(PendingDraft).where(PendingDraft.user_id == user_id))
     return result.scalar_one_or_none()
 
@@ -31,6 +48,17 @@ async def create_draft(
     intent: DraftIntent,
     items: list[dict[str, Any]],
 ) -> PendingDraft:
+    from calobot.telemetry.context import active_no_retention
+
+    if active_no_retention.get(False):
+        draft: PendingDraft = InMemoryPendingDraft(
+            user_id=user_id,
+            intent=intent,
+            payload={"items": items, "current_index": 0},
+        )
+        no_retention_drafts[user_id] = draft  # type: ignore[assignment]
+        return draft
+
     existing = await get_open_draft(session, user_id)
     if existing is not None:
         await session.delete(existing)
@@ -113,6 +141,14 @@ async def advance_to_next_item(session: AsyncSession, draft: PendingDraft) -> No
 
 
 async def discard_draft(session: AsyncSession, user_id: int) -> bool:
+    from calobot.telemetry.context import active_no_retention
+
+    if active_no_retention.get(False):
+        if user_id in no_retention_drafts:
+            del no_retention_drafts[user_id]
+            return True
+        return False
+
     draft = await get_open_draft(session, user_id)
     if draft is None:
         return False

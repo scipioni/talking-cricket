@@ -18,3 +18,12 @@ async def test_help_mentions_photo_capabilities(client):
     assert "piatto o alimento" in text
     assert "tabella nutrizionale" in text
     assert "codice a barre" in text
+
+
+async def test_help_mentions_activity_examples(client):
+    sent = await client.help()
+    assert len(sent) == 1
+    text = sent[0].text
+    assert "Attività" in text
+    assert "camminata" in text
+    assert "corsa" in text

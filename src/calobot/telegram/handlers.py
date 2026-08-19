@@ -121,9 +121,11 @@ HELP_TEXT = (
     "/memory_off - attiva la modalità nessuna ritenzione (per testare il bot senza salvare i dati)\n"
     "/memory_on - riattiva la modalità normale\n"
     "/help - mostra questo messaggio\n\n"
-    "Per registrare cibo, peso e attività, o chiedere un report, scrivimi "
-    "semplicemente in chat (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
-    "\"report settimanale\").\n\n"
+    "Per registrare dati, scrivimi semplicemente in chat! Ad esempio:\n"
+    "🍎 Cibo: <i>\"ho mangiato una mela\"</i>, <i>\"pasta al pomodoro ieri sera\"</i>\n"
+    "🏃‍♂️ Attività: <i>\"un'ora di camminata\"</i>, <i>\"mezz'ora di corsa stamattina\"</i>\n"
+    "⚖️ Peso: <i>\"oggi peso 78kg\"</i>\n"
+    "📊 Report: <i>\"report settimanale\"</i>\n\n"
     "Puoi anche inviarmi una FOTO di:\n"
     "- Un piatto o alimento per estrarre e registrare gli ingredienti\n"
     "- Una tabella nutrizionale sulla confezione di un prodotto per leggerla\n"
@@ -487,7 +489,14 @@ async def on_entry_control_callback(callback: CallbackQuery, bot: Bot, settings:
                 await callback.answer("Già eliminata o non trovata.")
         elif action == "modifica":
             await callback.answer()
+            if kind == "activity":
+                example = "no erano 20 minuti"
+            elif kind == "weight":
+                example = "no erano 77.5kg"
+            else:
+                example = "no erano 20g"
             await bot.send_message(
                 chat_id,
-                "Rispondi a questo messaggio (o al messaggio della voce) con la correzione, es. 'no erano 20g'.",
+                "Rispondi a questo messaggio (o al messaggio della voce) con la correzione, "
+                f"es. '{example}'.",
             )

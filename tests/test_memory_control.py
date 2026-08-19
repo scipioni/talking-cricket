@@ -5,13 +5,17 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def clean_no_retention():
+    from calobot.ingestion.drafts import no_retention_drafts
     from calobot.telemetry.context import _get_persistence_path, no_retention_chats
+
     no_retention_chats.clear()
+    no_retention_drafts.clear()
     path = _get_persistence_path()
     if path.exists():
         path.unlink()
     yield
     no_retention_chats.clear()
+    no_retention_drafts.clear()
     if path.exists():
         path.unlink()
 
@@ -107,3 +111,40 @@ async def test_no_retention_persistence_survives_reloads(client):
     no_retention_chats.add(client.chat_id)  # Add dummy
     load_no_retention_chats()
     assert client.chat_id not in no_retention_chats
+
+
+async def test_no_retention_mode_preserves_drafts_across_turns(client, db_session, llm):
+    from harness.state import create_onboarded_user
+
+    from calobot.persistence.seed import seed_all
+
+    # 1. Seed and onboard user directly
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, client.telegram_user_id)
+
+    # 2. Enable no-retention mode
+    await client.say("/memory_off")
+
+    # 3. Log a physical activity without specifying intensity, which requires clarification
+    # Push 1: classify -> activity
+    # Push 2: extract -> camminata, 30 min
+    # Push 3: resolve_met selection -> None
+    # Push 4: resolve_met estimate -> 5.5 MET
+    llm.push(
+        {"intent": "activity", "ignored_text": None},
+        {"activity_description": "camminata", "duration_minutes": 30},
+        {"selected_candidate_id": None},
+        {"met": 5.5},
+    )
+
+    replies = await client.say("ho camminato mezz'ora")
+
+    # It should ask for intensity
+    assert "intensità" in replies[0].text
+
+    # 4. Answer the clarification (e.g. svelta)
+    final_replies = await client.say("svelta")
+
+    # It should successfully log and finalize the activity!
+    assert "Registrato: camminata" in final_replies[0].text
+

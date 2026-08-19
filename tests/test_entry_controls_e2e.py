@@ -82,3 +82,83 @@ async def test_modify_control_explains_how_to_correct(db_session, client, llm):
     sent = await client.tap("✏️ modifica", on=confirmation)
 
     assert "rispondi" in sent[-1].text.lower()
+    assert "no erano 20g" in sent[-1].text.lower()
+
+
+async def test_modify_activity_control_explains_how_to_correct(db_session, client, llm):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "activity", "ignored_text": None},
+        {"activity_description": "camminata", "duration_minutes": 30, "intensity_text": "svelta"},
+        {"selected_candidate_id": None},
+        {"met": 3.0},
+    )
+    sent_msgs = await client.say("ho camminato 30 minuti svelta")
+    confirmation = sent_msgs[-1]
+
+    sent = await client.tap("✏️ modifica", on=confirmation)
+
+    assert "rispondi" in sent[-1].text.lower()
+    assert "no erano 20 minuti" in sent[-1].text.lower()
+
+
+async def test_reply_corrects_activity_duration(db_session, client, llm):
+    from calobot.persistence.models import ActivityEntry
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "activity", "ignored_text": None},
+        {"activity_description": "camminata", "duration_minutes": 30, "intensity_text": "svelta"},
+        {"selected_candidate_id": None},
+        {"met": 3.0},
+    )
+    sent_msgs = await client.say("ho camminato 30 minuti svelta")
+    confirmation = sent_msgs[-1]
+
+    # Reply to confirmation with duration correction
+    replied = await client.reply_to(confirmation, "no erano 2 ore")
+    assert "Corretto" in replied[-1].text
+    assert "camminata" in replied[-1].text
+    assert "120 min" in replied[-1].text
+
+    # Verify database entry updated
+    db_session.expire_all()
+    result = await db_session.execute(select(ActivityEntry))
+    entry = result.scalar_one_or_none()
+    assert entry is not None
+    assert entry.duration_minutes == 120.0
+
+
+async def test_reply_corrects_activity_description(db_session, client, llm):
+    from calobot.persistence.models import ActivityEntry
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "activity", "ignored_text": None},
+        {"activity_description": "camminata", "duration_minutes": 30, "intensity_text": "svelta"},
+        {"selected_candidate_id": None},
+        {"met": 3.0},
+    )
+    sent_msgs = await client.say("ho camminato 30 minuti svelta")
+    confirmation = sent_msgs[-1]
+
+    # Reply to confirmation with description correction
+    llm.push(
+        {"selected_candidate_id": None},
+        {"met": 8.0},  # corsa met
+    )
+    replied = await client.reply_to(confirmation, "no era corsa")
+    assert "Corretto" in replied[-1].text
+    assert "corsa" in replied[-1].text
+
+    # Verify database entry updated
+    db_session.expire_all()
+    result = await db_session.execute(select(ActivityEntry))
+    entry = result.scalar_one_or_none()
+    assert entry is not None
+    assert entry.activity == "corsa"
+    assert entry.met == 8.0

@@ -32,7 +32,7 @@ from calobot.ingestion.responses import OutgoingMessage
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.content import ImageContent, MessageContent, TextContent
 from calobot.llm.gateway import LLMGateway
-from calobot.persistence.models import DraftIntent, FoodEntry, Provenance, User
+from calobot.persistence.models import ActivityEntry, DraftIntent, FoodEntry, Provenance, User
 from calobot.persistence.repository import get_entries_in_range, get_last_entry, get_latest_weight
 from calobot.persistence.timeutil import period_bounds_utc, today_in_timezone
 from calobot.photo.barcode import decode_barcode
@@ -801,6 +801,62 @@ class MessagePipeline:
                 OutgoingMessage(
                     text=f"Corretto: {entry.description} {entry.grams:.0f}g - {entry.kcal:.0f} kcal",
                     entry_ref=("food", entry.id),
+                )
+            ]
+
+        if kind == "activity" and isinstance(entry, ActivityEntry):
+            from calobot.activity.planner import _parse_minutes_free_text
+
+            parsed_minutes = _parse_minutes_free_text(raw_text)
+            if parsed_minutes is not None:
+                weight = await get_latest_weight(self.session, self.user.id)
+                weight_kg = weight.kg if weight else 70.0
+                entry.duration_minutes = parsed_minutes
+                entry.kcal = entry.met * weight_kg * (parsed_minutes / 60.0)
+                await self.session.flush()
+                return [
+                    OutgoingMessage(
+                        text=(
+                            f"Corretto: {entry.activity} {entry.duration_minutes:.0f} min "
+                            f"- ~{entry.kcal:.0f} kcal"
+                        ),
+                        entry_ref=("activity", entry.id),
+                    )
+                ]
+
+        if kind == "activity" and isinstance(entry, ActivityEntry) and has_marker:
+            new_activity = raw_text
+            for marker in _CORRECTION_MARKERS:
+                new_activity = new_activity.replace(marker, "")
+            new_activity = new_activity.strip(" ,.")
+
+            from calobot.activity.planner import _parse_minutes_free_text
+
+            new_minutes = _parse_minutes_free_text(new_activity)
+            if new_minutes is not None:
+                pass
+            else:
+                new_minutes = entry.duration_minutes
+
+            from calobot.activity.resolver import resolve_met
+
+            met_result = await resolve_met(self.session, self.gateway, new_activity, None)
+            weight = await get_latest_weight(self.session, self.user.id)
+            weight_kg = weight.kg if weight else 70.0
+
+            entry.activity = new_activity
+            entry.duration_minutes = new_minutes
+            entry.met = met_result.met
+            entry.kcal = met_result.met * weight_kg * (new_minutes / 60.0)
+            entry.provenance = met_result.provenance
+            await self.session.flush()
+            return [
+                OutgoingMessage(
+                    text=(
+                        f"Corretto: {entry.activity} {entry.duration_minutes:.0f} min "
+                        f"- ~{entry.kcal:.0f} kcal"
+                    ),
+                    entry_ref=("activity", entry.id),
                 )
             ]
 
