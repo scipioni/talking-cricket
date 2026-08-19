@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -12,7 +11,6 @@ from calobot.llm.content import TextContent
 from calobot.persistence.models import Provenance
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
     from calobot.llm.gateway import LLMGateway
     from calobot.persistence.models import FoodEntry
 

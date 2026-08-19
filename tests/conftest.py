@@ -20,8 +20,11 @@ async def db_session() -> AsyncIterator:
     engine = create_engine("sqlite+aiosqlite://", in_memory=True)
     engine_module._engine = engine
     from sqlalchemy.ext.asyncio import async_sessionmaker
+    from calobot.persistence.engine import NonRetentiveAsyncSession
 
-    engine_module._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    engine_module._session_factory = async_sessionmaker(
+        engine, class_=NonRetentiveAsyncSession, expire_on_commit=False
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

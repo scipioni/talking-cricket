@@ -8,10 +8,12 @@ specs/entry-correction - Deterministic targeting of an entry (controls + reply-t
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from aiogram import Bot, F, Router
+from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.corrections.service import (
@@ -50,7 +52,41 @@ from calobot.telegram.keyboards import entry_controls_keyboard, options_keyboard
 
 logger = logging.getLogger(__name__)
 
+
+class TestAndProdTelemetryMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        chat_id = None
+        if isinstance(event, Message):
+            chat_id = event.chat.id
+        elif isinstance(event, CallbackQuery):
+            chat_id = event.message.chat.id if event.message is not None else event.from_user.id
+
+        if chat_id is not None:
+            from calobot.telemetry.context import (
+                active_chat_id,
+                active_no_retention,
+                no_retention_chats,
+            )
+
+            token_chat = active_chat_id.set(chat_id)
+            token_no_retention = active_no_retention.set(chat_id in no_retention_chats)
+            try:
+                return await handler(event, data)
+            finally:
+                active_chat_id.reset(token_chat)
+                active_no_retention.reset(token_no_retention)
+        else:
+            return await handler(event, data)
+
+
 router = Router()
+router.message.outer_middleware(TestAndProdTelemetryMiddleware())
+router.callback_query.outer_middleware(TestAndProdTelemetryMiddleware())
 
 def _disclaimer(bot_label: str) -> str:
     return (
@@ -61,20 +97,16 @@ def _disclaimer(bot_label: str) -> str:
 
 def _welcome_message(bot_label: str) -> str:
     return (
-        f"Ciao! Sono {bot_label} 🤖, un bot che ti aiuta a tenere traccia di cosa mangi, del "
-        "tuo peso e delle attività fisiche che svolgi, semplicemente scrivendomi in chat "
-        "come faresti con una persona (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
-        "\"camminata di mezz'ora\"). Ti mostro poi report e grafici sull'andamento.\n\n"
-        "Per capire i tuoi messaggi uso un modello linguistico (LLM); per calcolare le "
-        "calorie mi appoggio a una tabella di composizione degli alimenti tratta da USDA "
-        "FoodData Central (dominio pubblico) e a una tabella di attività fisiche compilata "
-        "per questo progetto - quando un alimento non è in tabella, il valore è una stima "
-        "del modello, e te lo segnalo sempre.\n\n"
-        "⚠️ Nota importante: questo non è un ausilio medico, ma un software sperimentale, "
-        "fornito così com'è, senza alcuna responsabilità dell'autore per l'accuratezza dei "
-        "dati o le conseguenze del suo utilizzo. Per obiettivi di salute specifici "
-        "rivolgiti sempre a un professionista.\n\n"
-        "Iniziamo con qualche domanda per calcolare il tuo fabbisogno calorico."
+        f"Ciao! Sono {bot_label} 🤖, il tuo assistente per il tracciamento di cibo, "
+        "peso e attività fisica.\n\n"
+        "Scrivimi in chat o inviami foto proprio come faresti con un amico! Ad esempio:\n"
+        "🍎 <i>\"Ho mangiato una mela\"</i> (o invia la foto di un piatto)\n"
+        "⚖️ <i>\"Oggi peso 78.5 kg\"</i>\n"
+        "🏃‍♂️ <i>\"30 minuti di corsa leggera\"</i>\n"
+        "📊 <i>\"Mostrami il report settimanale\"</i>\n\n"
+        "⚠️ <i>Nota: Questo è un software sperimentale e non sostituisce un parere medico. "
+        "Per obiettivi di salute rivolgiti sempre a un professionista.</i>\n\n"
+        "Iniziamo impostando il tuo profilo per calcolare il budget calorico!"
     )
 
 UNAVAILABLE_TEXT = "Il servizio è temporaneamente non disponibile, riprova tra poco."
@@ -86,10 +118,16 @@ HELP_TEXT = (
     "/profilo - mostra i tuoi dati e il budget calorico\n"
     "/annulla - elimina l'ultima voce registrata\n"
     "/cancellami - elimina definitivamente tutti i tuoi dati\n"
+    "/memory_off - attiva la modalità nessuna ritenzione (per testare il bot senza salvare i dati)\n"
+    "/memory_on - riattiva la modalità normale\n"
     "/help - mostra questo messaggio\n\n"
     "Per registrare cibo, peso e attività, o chiedere un report, scrivimi "
     "semplicemente in chat (es. \"ho mangiato una mela\", \"oggi peso 78kg\", "
     "\"report settimanale\").\n\n"
+    "Puoi anche inviarmi una FOTO di:\n"
+    "- Un piatto o alimento per estrarre e registrare gli ingredienti\n"
+    "- Una tabella nutrizionale sulla confezione di un prodotto per leggerla\n"
+    "- Un codice a barre per cercare l'alimento su OpenFoodFacts\n\n"
     "Per correggere un dato del tuo profilo, scrivimelo direttamente (es. \"la mia "
     "data di nascita è 16/5/1990\", \"ora il mio peso obiettivo è 74kg\") - te lo "
     "chiedo prima di applicarlo."
@@ -219,6 +257,29 @@ async def on_help(message: Message) -> None:
     await message.answer(HELP_TEXT)
 
 
+@router.message(Command("memory_off"))
+async def on_memory_off(message: Message) -> None:
+    from calobot.telemetry.context import no_retention_chats
+    chat_id = message.chat.id
+    no_retention_chats.add(chat_id)
+    await message.answer(
+        "Modalità \"nessuna ritenzione\" attivata. Le tue prossime azioni "
+        "non verranno salvate nel database. Usa /memory_on per tornare alla "
+        "modalità normale."
+    )
+
+
+@router.message(Command("memory_on"))
+async def on_memory_on(message: Message) -> None:
+    from calobot.telemetry.context import no_retention_chats
+    chat_id = message.chat.id
+    no_retention_chats.discard(chat_id)
+    await message.answer(
+        "Modalità normale riattivata. Le tue prossime azioni verranno "
+        "regolarmente salvate nel database."
+    )
+
+
 @router.message(Command("annulla"))
 async def on_undo(message: Message, bot: Bot, settings: Settings) -> None:
     telegram_user_id = _telegram_user_id(message)
@@ -250,7 +311,12 @@ async def on_profile(message: Message, bot: Bot, settings: Settings) -> None:
             await message.answer("Devi registrarti prima con /start.")
             return
         summary = await format_profile_summary(session, user)
-        await message.answer(summary)
+
+        from calobot.telemetry.context import no_retention_chats
+
+        is_off = message.chat.id in no_retention_chats
+        status_text = "OFF" if is_off else "ON"
+        await message.answer(f"{summary}\nStato memoria: {status_text}")
 
 
 @router.message(Command("cancellami"))

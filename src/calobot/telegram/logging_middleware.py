@@ -58,10 +58,20 @@ class IncomingLoggingMiddleware(BaseMiddleware):
             self._log_update(event)
             chat_id = _extract_chat_id(event)
             if chat_id is not None:
+                import uuid
+
+                from calobot.settings import get_settings
+                from calobot.telemetry.jsonl_logger import write_interaction_log
+
+                session_id = str(uuid.uuid4())
+                events: list[dict[str, Any]] = []
+                settings = data.get("settings") or get_settings()
+
                 # Build telemetry event payload
                 payload: dict[str, Any] = {
                     "type": "incoming_update",
                     "chat_id": chat_id,
+                    "session_id": session_id,
                     "timestamp": dt.datetime.now(dt.UTC).isoformat(),
                     "update_id": event.update_id,
                 }
@@ -77,10 +87,28 @@ class IncomingLoggingMiddleware(BaseMiddleware):
                         event.callback_query.from_user.username if event.callback_query.from_user else None
                     )
 
-                event_bus.publish(payload)
+                start_time = dt.datetime.now(dt.UTC)
+                success = True
+                error_message = None
 
-                with bind_telemetry_context(chat_id):
-                    return await handler(event, data)
+                with bind_telemetry_context(chat_id, session_id, events):
+                    event_bus.publish(payload)
+                    try:
+                        return await handler(event, data)
+                    except Exception as exc:
+                        success = False
+                        error_message = f"{type(exc).__name__}: {exc}"
+                        raise
+                    finally:
+                        await write_interaction_log(
+                            chat_id=chat_id,
+                            session_id=session_id,
+                            start_time=start_time,
+                            success=success,
+                            error_message=error_message,
+                            events=events,
+                            settings=settings,
+                        )
 
         return await handler(event, data)
 
@@ -156,9 +184,13 @@ class OutgoingLoggingMiddleware(BaseRequestMiddleware):
             text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
             api_method = getattr(method, "__api_method__", type(method).__name__)
 
+            from calobot.telemetry.context import active_session_id
+            session_id = active_session_id.get(None)
+
             payload: dict[str, Any] = {
                 "type": "outgoing_response",
                 "chat_id": chat_id,
+                "session_id": session_id,
                 "timestamp": dt.datetime.now(dt.UTC).isoformat(),
                 "method": api_method,
                 "text": text,

@@ -123,4 +123,28 @@ def portion_options_for(item: FoodItemExtraction) -> dict[str, float]:
             f"medio (~{item.portion_medium_g:.0f}g)": item.portion_medium_g,
             f"abbondante (~{item.portion_generous_g:.0f}g)": item.portion_generous_g,
         }
+
+    # If the food is a known countable item (e.g. uovo, mela, banana) in TYPICAL_UNIT_WEIGHTS_G,
+    # offer multiples of its typical unit weight as intuitive portion options.
+    desc = (item.count_unit_hint or item.description or "").strip().lower()
+    unit_weight = TYPICAL_UNIT_WEIGHTS_G.get(desc)
+    if unit_weight is not None:
+        singular = desc
+        plural = desc
+        keys_with_same_weight = [k for k, w in TYPICAL_UNIT_WEIGHTS_G.items() if w == unit_weight]
+        if desc == "uovo" or desc == "uova":
+            singular = "uovo"
+            plural = "uova"
+        else:
+            sorted_keys = sorted(keys_with_same_weight, key=len)
+            if sorted_keys:
+                singular = sorted_keys[0]
+                plural = sorted_keys[-1] if len(sorted_keys) > 1 else sorted_keys[0]
+
+        return {
+            f"1 {singular} (~{unit_weight:.0f}g)": unit_weight,
+            f"2 {plural} (~{unit_weight * 2:.0f}g)": unit_weight * 2,
+            f"3 {plural} (~{unit_weight * 3:.0f}g)": unit_weight * 3,
+        }
+
     return PORTION_OPTIONS_G

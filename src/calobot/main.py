@@ -47,6 +47,8 @@ async def _async_main(settings: Settings) -> None:
             BotCommand(command="profilo", description="Mostra i tuoi dati e il budget calorico"),
             BotCommand(command="annulla", description="Elimina l'ultima voce registrata"),
             BotCommand(command="cancellami", description="Elimina definitivamente tutti i dati"),
+            BotCommand(command="memory_off", description="Attiva modalità nessuna ritenzione (test)"),
+            BotCommand(command="memory_on", description="Riattiva la modalità normale"),
             BotCommand(command="help", description="Mostra i comandi disponibili"),
         ]
     )

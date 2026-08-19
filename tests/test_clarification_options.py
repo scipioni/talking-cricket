@@ -53,6 +53,24 @@ def test_portion_options_fall_back_when_the_estimates_are_incomplete():
     assert options == PORTION_OPTIONS_G
 
 
+def test_portion_options_for_known_countable_items():
+    # Test for "uovo"
+    options_egg = portion_options_for(_item(description="uovo"))
+    assert options_egg == {
+        "1 uovo (~55g)": 55,
+        "2 uova (~110g)": 110,
+        "3 uova (~165g)": 165,
+    }
+
+    # Test for "mela"
+    options_apple = portion_options_for(_item(description="mela"))
+    assert options_apple == {
+        "1 mela (~180g)": 180,
+        "2 mele (~360g)": 360,
+        "3 mele (~540g)": 540,
+    }
+
+
 # -- preparation scaled to the food ---------------------------------------
 
 

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from calobot.persistence.models import FoodEntry, Provenance
 from calobot.reporting.dietician import (
@@ -156,8 +154,9 @@ async def test_build_dietitian_review_calls_gateway_successfully():
 
 
 async def test_weekly_report_triggers_dietician_review(db_session, client, llm):
-    from calobot.persistence.seed import seed_all
     from harness.state import create_onboarded_user
+
+    from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
@@ -193,8 +192,9 @@ async def test_weekly_report_triggers_dietician_review(db_session, client, llm):
 
 
 async def test_weekly_report_with_insufficient_days_bypasses_llm_with_warning(db_session, client, llm):
-    from calobot.persistence.seed import seed_all
     from harness.state import create_onboarded_user
+
+    from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
@@ -217,8 +217,9 @@ async def test_weekly_report_with_insufficient_days_bypasses_llm_with_warning(db
 
 
 async def test_single_day_report_bypasses_dietician_completely(db_session, client, llm):
-    from calobot.persistence.seed import seed_all
     from harness.state import create_onboarded_user
+
+    from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)

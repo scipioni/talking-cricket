@@ -61,6 +61,9 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    jsonl_log_enabled: bool = True
+    jsonl_log_path: str = "/data/interactions.jsonl"
+
     web_port: int = 8083
 
     # Bounded resolution photos are downscaled to before inference (design.md -

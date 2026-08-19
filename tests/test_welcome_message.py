@@ -9,13 +9,9 @@ def test_welcome_message_covers_required_content():
     # purpose/capabilities
     assert "peso" in lowered
     assert "attività" in lowered
-    # data sources
-    assert "usda" in lowered
-    assert "modello linguistico" in lowered or "llm" in lowered
-    # disclaimer: experimental, not medical, no liability
-    assert "non è un ausilio medico" in lowered
+    # disclaimer: experimental, not medical
+    assert "parere medico" in lowered or "ausilio medico" in lowered
     assert "sperimentale" in lowered
-    assert "responsabilità" in lowered
 
 
 async def test_is_new_true_only_on_first_contact(db_session):

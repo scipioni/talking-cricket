@@ -31,6 +31,11 @@ class TelemetryEventBus:
 
     def publish(self, event: dict[str, Any]) -> None:
         """Publish an event to all subscribers synchronously and non-blocking."""
+        from calobot.telemetry.context import active_interaction_events
+        events_list = active_interaction_events.get(None)
+        if events_list is not None:
+            events_list.append(dict(event))
+
         if not self._listeners:
             return
 

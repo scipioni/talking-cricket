@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -15,8 +16,22 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+logger = logging.getLogger(__name__)
+
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+class NonRetentiveAsyncSession(AsyncSession):
+    async def commit(self) -> None:
+        """Bypass transaction commit if the active_no_retention context is True."""
+        from calobot.telemetry.context import active_no_retention
+
+        if active_no_retention.get(False):
+            logger.info("Database commit bypassed because no-retention mode is active.")
+            await self.flush()
+            return
+        await super().commit()
 
 
 def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
@@ -42,7 +57,9 @@ def create_engine(database_url: str, *, in_memory: bool = False) -> AsyncEngine:
 def init_engine(database_url: str, *, in_memory: bool = False) -> None:
     global _engine, _session_factory
     _engine = create_engine(database_url, in_memory=in_memory)
-    _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+    _session_factory = async_sessionmaker(
+        _engine, class_=NonRetentiveAsyncSession, expire_on_commit=False
+    )
 
 
 def get_engine() -> AsyncEngine:

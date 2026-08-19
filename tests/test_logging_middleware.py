@@ -135,3 +135,117 @@ async def test_outgoing_middleware_logs_a_failed_poll(caplog):
 
     assert "method=getUpdates" in caplog.text
     assert "failed" in caplog.text
+
+
+async def test_jsonl_logger_writes_correct_row(tmp_path):
+    import json
+
+    from calobot.settings import Settings
+    from calobot.telegram.logging_middleware import IncomingLoggingMiddleware, OutgoingLoggingMiddleware
+
+    log_file_path = tmp_path / "interactions.jsonl"
+    settings = Settings(
+        telegram_bot_token="test-token",
+        jsonl_log_enabled=True,
+        jsonl_log_path=str(log_file_path),
+    )
+
+    middleware = IncomingLoggingMiddleware()
+    update = _make_update("ciao bot!")
+
+    async def handler(event, data):
+        out_middleware = OutgoingLoggingMiddleware()
+        from aiogram.methods import SendMessage
+        method = SendMessage(chat_id=42, text="Ciao Stefano!")
+        
+        async def make_request(bot, method):
+            return "sent"
+        
+        await out_middleware(make_request, bot=None, method=method)
+        return "ok"
+
+    result = await middleware(handler, update, {"settings": settings})
+    assert result == "ok"
+
+    assert log_file_path.exists()
+
+    with open(log_file_path, encoding="utf-8") as f:
+        lines = f.readlines()
+    
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+
+    assert record["chat_id"] == 42
+    assert record["status"] == "success"
+    assert record["error"] is None
+    assert "session_id" in record
+    assert record["duration_seconds"] >= 0
+
+    assert record["user_message"]["text"] == "ciao bot!"
+    assert record["user_message"]["update_id"] == 100
+
+    assert len(record["bot_responses"]) == 1
+    assert record["bot_responses"][0]["text"] == "Ciao Stefano!"
+    assert record["bot_responses"][0]["method"] == "sendMessage"
+
+    assert len(record["activities"]) == 2
+    assert record["activities"][0]["type"] == "incoming_update"
+    assert record["activities"][1]["type"] == "outgoing_response"
+
+
+async def test_jsonl_logger_handles_handler_exception(tmp_path):
+    import json
+
+    from calobot.settings import Settings
+    from calobot.telegram.logging_middleware import IncomingLoggingMiddleware
+
+    log_file_path = tmp_path / "interactions.jsonl"
+    settings = Settings(
+        telegram_bot_token="test-token",
+        jsonl_log_enabled=True,
+        jsonl_log_path=str(log_file_path),
+    )
+
+    middleware = IncomingLoggingMiddleware()
+    update = _make_update("produce error")
+
+    async def handler(event, data):
+        raise ValueError("Something went wrong inside the handler")
+
+    with pytest.raises(ValueError, match="Something went wrong inside the handler"):
+        await middleware(handler, update, {"settings": settings})
+
+    assert log_file_path.exists()
+
+    with open(log_file_path, encoding="utf-8") as f:
+        lines = f.readlines()
+    
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+
+    assert record["chat_id"] == 42
+    assert record["status"] == "error"
+    assert "ValueError" in record["error"]
+    assert "Something went wrong inside the handler" in record["error"]
+
+
+async def test_jsonl_logger_disabled(tmp_path):
+    from calobot.settings import Settings
+    from calobot.telegram.logging_middleware import IncomingLoggingMiddleware
+
+    log_file_path = tmp_path / "interactions.jsonl"
+    settings = Settings(
+        telegram_bot_token="test-token",
+        jsonl_log_enabled=False,
+        jsonl_log_path=str(log_file_path),
+    )
+
+    middleware = IncomingLoggingMiddleware()
+    update = _make_update("ciao bot!")
+
+    async def handler(event, data):
+        return "ok"
+
+    await middleware(handler, update, {"settings": settings})
+    assert not log_file_path.exists()
+
