@@ -76,13 +76,15 @@ async def test_activity_report_totals(db_session):
 
 async def test_weight_report_trend_and_projection(db_session):
     user = await create_user(db_session, telegram_user_id=4)
-    base = dt.date.today() - dt.timedelta(days=6)
+    # Use a fixed Sunday so that "week" exactly matches base to base+6
+    reference_day = dt.date(2026, 8, 16) 
+    base = reference_day - dt.timedelta(days=6)
     for i, kg in enumerate([90, 89.5, 89, 88.5, 88, 87.5, 87]):
         db_session.add(WeightEntry(user_id=user.id, kg=kg, day=base + dt.timedelta(days=i)))
     await db_session.flush()
 
     report = await build_weight_report(
-        db_session, user.id, "week", dt.date.today(), TZ, goal_kg=80.0
+        db_session, user.id, "week", reference_day, TZ, goal_kg=80.0
     )
     assert report.has_data
     assert report.start_kg == 90

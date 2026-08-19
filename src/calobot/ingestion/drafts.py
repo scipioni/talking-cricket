@@ -26,7 +26,7 @@ class InMemoryPendingDraft(PendingDraft):
         self.intent = intent
         self.payload = payload
         self.awaiting_field: str | None = None
-        self.updated_at: dt.datetime = dt.datetime.now(dt.UTC)
+        self.updated_at: dt.datetime = utcnow()
 
 
 no_retention_drafts: dict[int, InMemoryPendingDraft] = {}

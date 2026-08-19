@@ -31,7 +31,8 @@ Classifica il messaggio dell'utente in ESATTAMENTE uno di questi intent:
 Se il messaggio contiene più di un intent (es. "ho mangiato una mela e peso
 77kg"), scegli l'intent DOMINANTE e riporta in ignored_text il testo verbatim
 della parte che non stai classificando, così non viene perso silenziosamente.
-Se c'è un solo intent, ignored_text deve essere null.
+Se c'è un solo intent, ignored_text deve essere null. Non inserire MAI l'intero
+messaggio in ignored_text: fallo solo se ci sono intent aggiuntivi non classificati.
 """
 
 
