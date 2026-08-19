@@ -198,7 +198,7 @@ tasks:
     cmds:
       - uv run python scripts/bump_version.py {{.PART}}
       - uv lock
-      - git add pyproject.toml uv.lock
+      - git add pyproject.toml uv.lock CHANGELOG.md
       - |
         NEW_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
         git commit -m "chore: release v${NEW_VERSION}"

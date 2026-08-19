@@ -109,3 +109,8 @@ No. Non è uno strumento medico: su domande cliniche, farmaci o disturbi aliment
 ---
 
 *Grillo Parlante - Il piccolo grillo che ti tiene onesto su quello che mangi*
+
+## Changelog
+
+Tutte le modifiche importanti e i rilasci di Grillo Parlante sono documentati nel file [CHANGELOG.md](CHANGELOG.md).
+
