@@ -21,6 +21,7 @@ from calobot.persistence.models import User
 from calobot.safety.claims import asserts_a_record
 from calobot.safety.conversation import handle_other
 from calobot.safety.medical import REFUSAL_TEXT, is_medical_topic
+from calobot.telemetry.context import active_chat_id
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ Hai a disposizione strumenti di sola lettura per recuperare i suoi dati reali. R
   alle calorie: non esiste uno strumento per quelli, e non devi inventarli.
 - Quando ritieni di avere abbastanza dati (o di non averne bisogno), fermati: non
   chiamare altri strumenti.
+- Se nel messaggio dell'utente ci sono pronomi o riferimenti ambigui (es. 'che proprietà hanno', 'quali sono le sue proprietà'), usa la cronologia dei messaggi inclusa nel prompt per identificare a quale alimento, peso o attività si riferisce l'utente.
 """
 
 
@@ -86,6 +88,7 @@ Regole valide in entrambi i casi:
   "quando pesarsi") non e' una domanda medica.
 - Non affermare mai di aver registrato, salvato, modificato o eliminato qualcosa: puoi
   solo leggere e spiegare, non scrivere nulla nel diario.
+- Se nella domanda originale dell'utente ci sono pronomi o riferimenti ambigui (es. 'che proprietà hanno'), usa la cronologia dei messaggi inclusa per comprendere a cosa si riferisce la domanda e rispondi specificando chiaramente di cosa stai parlando (es. spiegando le proprietà dei 'crauti fermentati' se la cronologia recente mostra che si parlava di quello).
 
 RICETTE E SUGGERIMENTI DI PASTI:
 - Se l'utente chiede idee su cosa mangiare o ricette (es. "cosa posso mangiare stasera?"), controlla se è stato usato lo strumento `get_profile_and_budget` per verificare le calorie rimanenti oggi (`remaining_today_kcal`):
@@ -120,11 +123,36 @@ UNFOUNDED_CLAIM_REPLACEMENT = (
 )
 
 
-def _narration_prompt(raw_text: str, tool_results: list[ToolCallResult]) -> str:
+def _get_recent_history_context(chat_id: int | None) -> str:
+    if chat_id is None:
+        return ""
+    from calobot.telemetry.history import telemetry_history
+    events = telemetry_history.get_events(chat_id)
+    if not events:
+        return ""
+
+    recent_lines = []
+    for e in events:
+        if e.get("type") == "incoming_update" and e.get("text"):
+            recent_lines.append(f"User: {e['text']}")
+        elif e.get("type") == "outgoing_response" and e.get("text"):
+            recent_lines.append(f"Bot: {e['text'].strip()}")
+
+    # Take the last 6 lines of conversation to keep it concise but contextual
+    recent_lines = recent_lines[-6:]
+    if not recent_lines:
+        return ""
+
+    return "\n".join(recent_lines)
+
+
+def _narration_prompt(raw_text: str, tool_results: list[ToolCallResult], history_context: str = "") -> str:
     payload = [
         {"tool": r.tool, "arguments": r.arguments, "result": r.result} for r in tool_results
     ]
+    history_part = f"Cronologia recente dei messaggi:\n{history_context}\n\n" if history_context else ""
     return (
+        f"{history_part}"
         f'Domanda originale dell\'utente: "{raw_text}"\n\n'
         f"Risultati degli strumenti (lista vuota se nessuno e' stato usato):\n"
         f"{json.dumps(payload, indent=2, ensure_ascii=False)}"
@@ -148,18 +176,32 @@ async def answer(
         return REFUSAL_TEXT
 
     try:
+        chat_id = active_chat_id.get(None)
+        history_context = _get_recent_history_context(chat_id)
+
+        enriched_content = content
+        if history_context and isinstance(content, TextContent):
+            prompt_text = (
+                f"[Cronologia recente dei messaggi (usa questa cronologia per comprendere il contesto ed "
+                f"eventuali riferimenti a pronomi o cibi nominati in precedenza)]:\n"
+                f"{history_context}\n\n"
+                f"[Nuovo messaggio dell'utente]:\n"
+                f"{raw_text}"
+            )
+            enriched_content = TextContent(text=prompt_text)
+
         tools = await build_tool_registry(session, gateway, user, tz)
         gather = await gateway.call_agentic(
             step="advice_gather",
             system_prompt=GATHER_SYSTEM_PROMPT,
-            content=content,
+            content=enriched_content,
             tools=tools,
             max_rounds=max_rounds,
         )
         if gather.exhausted:
             return COULD_NOT_ANSWER_TEXT
 
-        narration = TextContent(text=_narration_prompt(raw_text, gather.tool_results))
+        narration = TextContent(text=_narration_prompt(raw_text, gather.tool_results, history_context))
         result = await gateway.call_structured(
             step="advice_narrate",
             system_prompt=_narrate_system_prompt(bot_label),

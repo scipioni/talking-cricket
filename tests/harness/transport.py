@@ -148,6 +148,34 @@ class FakeBot(Bot):
     # -- interception -----------------------------------------------------
 
     async def __call__(self, method: TelegramMethod, request_timeout: int | None = None):  # type: ignore[override]
+        from calobot.telemetry.bus import event_bus
+        from calobot.telemetry.context import active_session_id
+        import datetime as dt
+
+        chat_id = getattr(method, "chat_id", None)
+        if chat_id is not None:
+            try:
+                chat_id = int(chat_id)
+            except (ValueError, TypeError):
+                pass
+
+            text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+            options = decode_options(getattr(method, "reply_markup", None))
+            api_method = type(method).__name__
+            session_id = active_session_id.get(None)
+
+            payload = {
+                "type": "outgoing_response",
+                "chat_id": chat_id,
+                "session_id": session_id,
+                "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+                "method": api_method,
+                "text": text,
+                "options": options,
+                "has_image": isinstance(method, SendPhoto),
+            }
+            event_bus.publish(payload)
+
         if isinstance(method, SendMessage):
             return self._record(method.chat_id, method.text, method.reply_markup, has_image=False)
 

@@ -35,7 +35,9 @@ def _shared_dispatcher() -> Dispatcher:
     passed per call - so sharing is safe."""
     global _dispatcher
     if _dispatcher is None:
+        from calobot.telegram.logging_middleware import IncomingLoggingMiddleware
         dispatcher = Dispatcher()
+        dispatcher.update.outer_middleware(IncomingLoggingMiddleware())
         dispatcher.include_router(router)
         _dispatcher = dispatcher
     return _dispatcher

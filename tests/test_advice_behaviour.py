@@ -519,3 +519,75 @@ async def test_recipe_suggestion_when_over_budget_provides_empathetic_counseling
     assert "get_profile_and_budget" in offered_names
     run.assert_clean()
 
+
+# -- 7.19 advice context resolution retains recent history ----------------------
+
+
+async def test_advice_context_resolution_retains_recent_history(db_session, run, monkeypatch):
+    from harness.state import food_extraction
+    from calobot.telemetry.history import telemetry_history
+    import asyncio
+
+    telemetry_history.start_listening()
+    try:
+        await seed_all(db_session)
+        await create_onboarded_user(db_session, 42)
+
+        llm = _install(run, monkeypatch)
+
+        # First, log a food successfully
+        llm.push(
+            {"intent": "food", "ignored_text": None},
+            food_extraction(description="crauti fermentati", quantity_grams=200),
+            {"selected_candidate_id": None},
+            {"kcal_per_100g": 20, "display_name_it": "crauti fermentati"},
+        )
+
+        logged = await run.say("ho mangiato 200g di crauti fermentati")
+        assert any("crauti fermentati" in msg.text for msg in logged)
+        
+        # Give the telemetry history background task a tiny moment to ingest the events
+        await asyncio.sleep(0.05)
+
+        # Next, ask the ambiguous question
+        llm.push({"intent": "other", "ignored_text": None})
+        llm.push_agent_turn(
+            [],
+            final={
+                "answer_text": "I crauti fermentati sono ricchi di probiotici e fanno benissimo all'intestino.",
+                "used_data": False,
+                "declined_reason": None,
+            },
+        )
+
+        sent = await run.say("Che proprietà hanno?")
+        assert "intestino" in sent[-1].text
+        
+        # Give telemetry a moment to ingest
+        await asyncio.sleep(0.05)
+
+        # Verify that the advice_gather call included the history context in its prompt
+        gather_calls = [c for c in llm.calls if "tools" in c]
+        assert len(gather_calls) == 1
+
+        prompt_used = gather_calls[0]["messages"][1]["content"][0]["text"]
+        assert "Registrato: crauti fermentati" in prompt_used
+        assert "Che proprietà hanno?" in prompt_used
+
+        # Verify that the advice_narrate call also included the history context
+        narrate_calls = [
+            c for c in llm.calls 
+            if c.get("response_format") and c["response_format"].get("json_schema", {}).get("name") == "AdviceAnswer"
+        ]
+        assert len(narrate_calls) == 1
+
+        narrate_prompt = narrate_calls[0]["messages"][1]["content"][0]["text"]
+        assert "Registrato: crauti fermentati" in narrate_prompt
+        assert "Che proprietà hanno?" in narrate_prompt
+
+        run.assert_clean()
+    finally:
+        telemetry_history.stop_listening()
+
+
+
