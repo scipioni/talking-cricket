@@ -206,3 +206,68 @@ async def test_report_message_end_to_end(db_session, client, llm):
 
     assert len(sent) == 1
     assert "dati" in sent[0].text.lower()  # nothing logged -> "non ci sono dati"
+
+
+async def test_report_daily_rolling_average_and_weight_formatting(db_session, client, llm):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    from calobot.persistence.models import FoodEntry, WeightEntry, Provenance
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42, weight_kg=76.0)
+    user.peso_obiettivo_kg = 75.0
+
+    tz = ZoneInfo("Europe/Rome")
+    today = dt.datetime.now(tz)
+    yesterday = today - dt.timedelta(days=1)
+
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=100,
+            kcal_per_100g=52,
+            kcal=467.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="banana",
+            grams=100,
+            kcal_per_100g=89,
+            kcal=533.0,
+            provenance=Provenance.tabella,
+            consumed_at=yesterday,
+        )
+    )
+    await db_session.flush()
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "all"},
+    )
+
+    sent = await client.say("report di oggi")
+
+    assert len(sent) == 3
+
+    # Food report assertions
+    food_msg = next(msg for msg in sent if "Calorie" in msg.text)
+    assert "totale 467 kcal" in food_msg.text
+    assert "media giornaliera 500 kcal" in food_msg.text
+
+    budget = await current_budget(db_session, user)
+    budget_kcal = budget.target_kcal if budget else None
+    if budget_kcal is not None:
+        expected_diff = 467.0 - budget_kcal
+        assert f"differenza {expected_diff:+.0f}" in food_msg.text
+
+    # Weight report assertions
+    weight_msg = next(msg for msg in sent if "Peso" in msg.text)
+    assert "Peso (day): 76.0 kg" in weight_msg.text
+    assert "da 76.0 a 76.0 kg" not in weight_msg.text
+    assert "mancano -1.0 kg" in weight_msg.text or "mancano 1.0 kg" in weight_msg.text

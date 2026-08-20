@@ -942,10 +942,13 @@ class MessagePipeline:
             if not weight_report.has_data:
                 messages.append(OutgoingMessage(text="Non ci sono dati sul peso per questo periodo."))
             else:
-                text = (
-                    f"Peso ({period}): da {weight_report.start_kg:.1f} a {weight_report.end_kg:.1f} kg "
-                    f"({weight_report.change_kg:+.1f} kg)"
-                )
+                if weight_report.start_kg == weight_report.end_kg:
+                    text = f"Peso ({period}): {weight_report.end_kg:.1f} kg"
+                else:
+                    text = (
+                        f"Peso ({period}): da {weight_report.start_kg:.1f} a {weight_report.end_kg:.1f} kg "
+                        f"({weight_report.change_kg:+.1f} kg)"
+                    )
                 if weight_report.remaining_to_goal_kg is not None:
                     text += f", mancano {weight_report.remaining_to_goal_kg:+.1f} kg all'obiettivo"
                 if weight_report.projected_date:

@@ -127,3 +127,74 @@ def test_render_weight_chart_handles_italian_accents():
     points = [WeightPoint(day=dt.date.today(), kg=80.0)]
     png = render_weight_chart(points, goal_kg=None, projected_date=None)
     assert png.startswith(b"\x89PNG")
+
+
+async def test_food_report_daily_rolling_average(db_session):
+    user = await create_user(db_session, telegram_user_id=10)
+    today = dt.datetime.now(TZ)
+    yesterday = today - dt.timedelta(days=1)
+    two_days_ago = today - dt.timedelta(days=2)
+    eight_days_ago = today - dt.timedelta(days=8)
+
+    # Today's entry
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=100,
+            kcal_per_100g=52,
+            kcal=52.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    # Yesterday's entry
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="banana",
+            grams=100,
+            kcal_per_100g=89,
+            kcal=89.0,
+            provenance=Provenance.tabella,
+            consumed_at=yesterday,
+        )
+    )
+    # 2 days ago entry
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="pane",
+            grams=100,
+            kcal_per_100g=250,
+            kcal=250.0,
+            provenance=Provenance.tabella,
+            consumed_at=two_days_ago,
+        )
+    )
+    # 8 days ago entry - should NOT be included in the 7-day rolling average
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="pizza",
+            grams=100,
+            kcal_per_100g=266,
+            kcal=266.0,
+            provenance=Provenance.tabella,
+            consumed_at=eight_days_ago,
+        )
+    )
+    await db_session.flush()
+
+    # Budget
+    budget_kcal = 2000.0
+
+    # Build report for today
+    report = await build_food_report(db_session, user.id, "day", today.date(), TZ, budget_kcal=budget_kcal)
+    assert report.has_data
+    # Total should only be today's food
+    assert report.total_kcal == 52.0
+    # Average should be the 7-day average of logged days: (52 + 89 + 250) / 3 = 130.333...
+    assert abs(report.daily_average_kcal - 130.33) < 0.1
+    # Difference should be today's total minus budget: 52 - 2000 = -1948
+    assert report.difference_kcal == 52.0 - budget_kcal

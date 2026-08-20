@@ -13,7 +13,7 @@ from calobot.persistence.repository import (
     get_entries_in_range,
     get_weight_entries_in_range,
 )
-from calobot.persistence.timeutil import period_bounds_utc, today_local
+from calobot.persistence.timeutil import period_bounds_utc, today_local, start_of_day_utc
 from calobot.reporting.periods import Period
 
 MIN_MEASUREMENTS_FOR_TREND = 3
@@ -88,8 +88,18 @@ async def build_food_report(
     days_with_no_data = [d for d in all_days if d not in days_with_data and d <= today_local()]
 
     num_days_counted = max(len(days_with_data), 1)
-    average = total / num_days_counted
-    difference = (average - budget_kcal) if budget_kcal is not None else None
+    if period == "day":
+        start_7d = start_of_day_utc(reference_day - dt.timedelta(days=6), tz)
+        end_7d = start_of_day_utc(reference_day + dt.timedelta(days=1), tz)
+        avg_entries = await get_entries_in_range(session, "food", user_id, start_7d, end_7d)
+        avg_days_with_data = {e.consumed_at.astimezone(tz).date() for e in avg_entries}
+        num_days_counted = max(len(avg_days_with_data), 1)
+        avg_total = sum(e.kcal for e in avg_entries)
+        average = avg_total / num_days_counted
+        difference = (total - budget_kcal) if budget_kcal is not None else None
+    else:
+        average = total / num_days_counted
+        difference = (average - budget_kcal) if budget_kcal is not None else None
 
     return FoodReport(
         total_kcal=total,
