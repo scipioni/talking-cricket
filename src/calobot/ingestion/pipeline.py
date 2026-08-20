@@ -424,6 +424,17 @@ class MessagePipeline:
         if draft.intent == DraftIntent.profile:
             return await self._handle_profile_draft_answer(draft, raw_text)
 
+        ALLOWED_PORTION_WORDS = {
+            # Units
+            "g", "gr", "grammi", "grammo", "kg", "kilo", "chili", "chilo", "etti", "etto", "hg", "h", "ore", "ora", "min", "minuti", "minuto",
+            # Option adjectives
+            "piccolo", "piccola", "medio", "media", "abbondante", "generoso", "generosa", "grande", "scarsi", "scarsa", "scarso",
+            # Prepositions / Filler / Verbs
+            "circa", "quasi", "all'incirca", "all", "incirca", "di", "da", "pesava", "pesano", "era", "erano", "sono", "un", "una", "uno", "e", "mezza", "mezzo", "più", "o", "meno", "piu", "le", "la", "il", "lo", "i", "gli", "per", "con", "a",
+            # Number words
+            "un", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "venti", "trenta", "quaranta", "cinquanta", "sessanta", "settanta", "ottanta", "novanta", "cento"
+        }
+
         planner = food_planner if draft.intent == DraftIntent.food else activity_planner
         field = draft.awaiting_field
         item = drafts.current_item(draft)
@@ -431,6 +442,65 @@ class MessagePipeline:
         # Checked before the answer is parsed, so it can never be read as a quantity.
         if raw_text.strip() == ABANDON_OPTION:
             return await self._abandon_draft(draft)
+
+        # Intercept fresh intents before trying to parse the answer, to avoid eagerly
+        # reading quantities from completely unrelated new food/activity/weight logging.
+        is_button_tap = False
+        clarification = await planner.check_item(self.session, item)
+        if clarification and clarification.options:
+            if raw_text.strip() in clarification.options:
+                is_button_tap = True
+
+        # Check if the user's message is a simple portion/duration answer
+        is_simple_ans = is_button_tap
+        if not is_simple_ans:
+            # Check if all words are within allowed portion-size/duration words
+            cleaned = re.sub(r"[0-9.,~()'\-`’]", " ", raw_text.lower())
+            words = [w for w in cleaned.split() if w]
+            is_simple_ans = len(words) > 0 and all(w in ALLOWED_PORTION_WORDS for w in words)
+
+        classification = None
+        if not is_simple_ans:
+            try:
+                classification = await classify(self.gateway, content)
+                is_fresh_intent = False
+
+                if classification.intent in LOGGABLE_INTENTS:
+                    if classification.intent not in ("food", "activity"):
+                        is_fresh_intent = True
+                    elif classification.intent == "food":
+                        if draft.intent != DraftIntent.food:
+                            is_fresh_intent = True
+                        else:
+                            extraction = await extract_food(self.gateway, content)
+                            if extraction.items:
+                                new_food_desc = extraction.items[0].description
+                                if new_food_desc and new_food_desc.strip():
+                                    draft_desc = item.get("description", "").lower().strip()
+                                    new_desc = new_food_desc.lower().strip()
+                                    if draft_desc not in new_desc and new_desc not in draft_desc:
+                                        is_fresh_intent = True
+                    elif classification.intent == "activity":
+                        if draft.intent != DraftIntent.activity:
+                            is_fresh_intent = True
+                        else:
+                            extraction = await extract_activity(self.gateway, content)
+                            new_act_desc = extraction.activity_description
+                            if new_act_desc and new_act_desc.strip():
+                                draft_act = item.get("activity_description", "").lower().strip()
+                                new_act = new_act_desc.lower().strip()
+                                if draft_act not in new_act and new_act not in draft_act:
+                                    is_fresh_intent = True
+
+                if is_fresh_intent:
+                    await drafts.discard_draft(self.session, self.user.id)
+                    notice = OutgoingMessage(
+                        text="Ho annullato la richiesta precedente per gestire questo nuovo messaggio."
+                    )
+                    return [notice, *await self._handle_fresh(content, raw_text)]
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error("Error checking fresh intent: %s", exc)
 
         resolved_before = dict(item.get("resolved", {}))
         updated_item = planner.apply_answer(item, field, raw_text)
@@ -440,7 +510,8 @@ class MessagePipeline:
         )
 
         if not answered:
-            classification = await classify(self.gateway, content)
+            if classification is None:
+                classification = await classify(self.gateway, content)
             if classification.intent in LOGGABLE_INTENTS:
                 await drafts.discard_draft(self.session, self.user.id)
                 notice = OutgoingMessage(

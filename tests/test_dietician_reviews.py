@@ -241,3 +241,52 @@ async def test_single_day_report_bypasses_dietician_completely(db_session, clien
     text = sent[0].text
     assert "IL PARERE DEL NUTRIZIONISTA" not in text
 
+
+async def test_weekly_report_splits_if_review_is_too_long(db_session, client, llm):
+    from harness.state import create_onboarded_user
+
+    from calobot.persistence.seed import seed_all
+
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    # Add entries on 3 distinct days: Aug 17, 18, 19
+    db_session.add(_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)))
+    db_session.add(_make_entry("Pasta", 100, 350, Provenance.tabella, dt.datetime(2026, 8, 18, 13, 0)))
+    db_session.add(_make_entry("Insalata", 200, 20, Provenance.tabella, dt.datetime(2026, 8, 19, 20, 0)))
+    await db_session.flush()
+
+    # Script LLM responses:
+    # 1. Classification
+    llm.push({"intent": "report", "ignored_text": None})
+    # 2. Report extraction
+    llm.push({"period_text": "questa settimana", "topic": "food"})
+    # 3. Dietician structured review with long fields to exceed 1024 characters
+    llm.push({
+        "summary": "A" * 300,
+        "density_insight": "B" * 300,
+        "temporal_pattern_insight": "C" * 300,
+        "sourcing_insight": "D" * 300,
+        "actionable_tip": "E" * 100
+    })
+
+    sent = await client.say("mostrami il report di questa settimana")
+    
+    # It should be split into 2 messages: the photo with the short calorie summary caption,
+    # and a separate text message containing the complete, long dietician review.
+    assert len(sent) == 2
+    
+    # Message 0 is the photo with the short caption (calorie summary)
+    assert sent[0].has_image is True
+    assert "Calorie (week):" in sent[0].text
+    assert "IL PARERE DEL NUTRIZIONISTA" not in sent[0].text
+    assert len(sent[0].text) < 200
+
+    # Message 1 is the dietician review sent as a separate message
+    assert sent[1].has_image is False
+    assert "IL PARERE DEL NUTRIZIONISTA" in sent[1].text
+    assert "A" * 300 in sent[1].text
+    assert "B" * 300 in sent[1].text
+    assert "E" * 100 in sent[1].text
+
+

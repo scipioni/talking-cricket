@@ -153,11 +153,33 @@ async def _send_outgoing(
     reply_markup = options_keyboard(message.buttons) if message.buttons else None
 
     if message.photo_png is not None:
-        sent = await bot.send_photo(
-            chat_id,
-            BufferedInputFile(message.photo_png, filename="report.png"),
-            caption=message.text[:1024],
-        )
+        if len(message.text) <= 1024:
+            sent = await bot.send_photo(
+                chat_id,
+                BufferedInputFile(message.photo_png, filename="report.png"),
+                caption=message.text,
+            )
+        else:
+            # Split the message to avoid Telegram's 1024 character caption limit truncation.
+            # Try to find a logical split point like dietician review separator, double newline, or single newline.
+            split_idx = message.text.find("\n\n🍎")
+            if split_idx == -1:
+                split_idx = message.text.rfind("\n\n", 0, 1024)
+            if split_idx == -1:
+                split_idx = message.text.rfind("\n", 0, 1024)
+            if split_idx == -1 or split_idx == 0:
+                split_idx = 1024
+
+            caption = message.text[:split_idx].strip()
+            remaining_text = message.text[split_idx:].strip()
+
+            sent = await bot.send_photo(
+                chat_id,
+                BufferedInputFile(message.photo_png, filename="report.png"),
+                caption=caption,
+            )
+            if remaining_text:
+                await bot.send_message(chat_id, remaining_text, reply_markup=reply_markup)
     else:
         sent = await bot.send_message(chat_id, message.text, reply_markup=reply_markup)
 

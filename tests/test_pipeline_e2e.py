@@ -271,3 +271,64 @@ async def test_report_daily_rolling_average_and_weight_formatting(db_session, cl
     assert "Peso (day): 76.0 kg" in weight_msg.text
     assert "da 76.0 a 76.0 kg" not in weight_msg.text
     assert "mancano -1.0 kg" in weight_msg.text or "mancano 1.0 kg" in weight_msg.text
+
+
+async def test_new_food_cancels_existing_draft_even_if_it_has_a_number(db_session, client, llm):
+    from sqlalchemy import select
+    from calobot.persistence.models import FoodEntry
+
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    # 1. User says "ho mangiato un avocado" (which lacks a portion weight)
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(
+            description="avocado", quantity_grams=None, household_measure="un frutto"
+        ),
+    )
+    first_reply = await client.say("ho mangiato un avocado")
+    assert "avocado" in first_reply[0].text
+    assert first_reply[0].options  # Clarification prompt with buttons is shown
+
+    # 2. User replies with a COMPLETELY new food logging containing a number: "Cetriolo 10g"
+    # This should:
+    # - classify the new text (not simple portion text -> classif. is "food")
+    # - extract the food (it finds "cetriolo", which doesn't match draft's "avocado")
+    # - discard the avocado draft and output cancellation notice
+    # - process "Cetriolo 10g" freshly: classify -> extract -> resolve candidates -> resolve energy
+    cetriolo_ext = food_extraction(description="cetriolo", quantity_grams=10)
+    
+    llm.push(
+        # Under open draft: classify the input "Cetriolo 10g"
+        {"intent": "food", "ignored_text": None},
+        # Under open draft: extract the food from "Cetriolo 10g" to check if different
+        cetriolo_ext,
+        # Under fresh handling: classify "Cetriolo 10g"
+        {"intent": "food", "ignored_text": None},
+        # Under fresh handling: extract food
+        cetriolo_ext,
+        # Resolve candidates
+        {"selected_candidate_id": None},
+        # Resolve energy
+        {"kcal_per_100g": 16, "display_name_it": "cetriolo"},
+    )
+
+    follow_up = await client.say("Cetriolo 10g")
+
+    # Should have 2 replies:
+    # 1. Notice of cancellation
+    # 2. Cetriolo registration confirmation
+    assert len(follow_up) == 2
+    assert "annullato la richiesta precedente" in follow_up[0].text
+    assert "cetriolo" in follow_up[1].text.lower()
+    assert "10g" in follow_up[1].text
+    assert "2 kcal" in follow_up[1].text
+
+    # Let's verify that ONLY Cetriolo was stored, and Avocado was NOT stored!
+    db_session.expire_all()
+    entries = list((await db_session.execute(select(FoodEntry))).scalars())
+    assert len(entries) == 1
+    assert entries[0].description == "cetriolo"
+    assert entries[0].grams == 10
+
