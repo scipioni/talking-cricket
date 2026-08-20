@@ -74,6 +74,7 @@ async def test_profile_command_shows_memory_status(client):
     # 1. Check with memory ON (default)
     replies_on = await client.say("/profilo")
     assert "Stato memoria: ON" in replies_on[0].text
+    assert f"ID Chat: {client.chat_id}" in replies_on[0].text
 
     # 2. Check with memory OFF
     await client.say("/memory_off")

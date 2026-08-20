@@ -320,7 +320,7 @@ async def on_profile(message: Message, bot: Bot, settings: Settings) -> None:
 
         is_off = message.chat.id in no_retention_chats
         status_text = "OFF" if is_off else "ON"
-        await message.answer(f"{summary}\nStato memoria: {status_text}")
+        await message.answer(f"{summary}\nStato memoria: {status_text}\nID Chat: {message.chat.id}")
 
 
 @router.message(Command("cancellami"))
