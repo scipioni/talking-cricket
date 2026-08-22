@@ -182,3 +182,32 @@ async def test_reply_to_modify_prompt_corrects_the_entry(db_session, client, llm
     entries = await _entries(db_session)
     assert entries[0].grams == 20
 
+
+async def test_correction_confirmation_avoids_infinite_loop(db_session, client, llm):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    # 1. Log a coffee
+    await _log(client, llm, "caffè", 100)
+
+    # 2. Ask to cancel/delete it (will be classified as correction intent)
+    llm.push(
+        {"intent": "correction", "ignored_text": None},
+    )
+    prompt_msgs = await client.say("Cancella il mio caffè")
+    assert "Intendi correggere l'ultima voce" in prompt_msgs[-1].text
+
+    # 3. Tap "è una correzione" - should apply correction, not loop
+    llm.push(
+        {"selected_candidate_id": None},
+        {"kcal_per_100g": 10, "display_name_it": "Cancella il mio caffè"},
+    )
+    sent = await client.tap("è una correzione", on=prompt_msgs[-1])
+
+    assert "Corretto: Cancella il mio caffè" in sent[-1].text
+    assert "Intendi correggere" not in sent[-1].text
+
+    # Verify that the entry in DB has been corrected
+    entries = await _entries(db_session)
+    assert entries[0].description == "Cancella il mio caffè"
+

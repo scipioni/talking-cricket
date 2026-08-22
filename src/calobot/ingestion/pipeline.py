@@ -833,7 +833,10 @@ class MessagePipeline:
         return await self._handle_correction(raw_text, target=(kind, entry))
 
     async def _handle_correction(
-        self, raw_text: str, target: tuple[str, object] | None = None
+        self,
+        raw_text: str,
+        target: tuple[str, object] | None = None,
+        already_confirmed: bool = False,
     ) -> list[OutgoingMessage]:
         """target, when given, is a (kind, entry) pair already resolved by the
         telegram layer from a reply-to a confirmation message (specs/entry-correction
@@ -845,7 +848,7 @@ class MessagePipeline:
         kind, entry = last
 
         quantity_match = _QUANTITY_WITH_GRAMS.search(raw_text.lower())
-        has_marker = any(m in raw_text.lower() for m in _CORRECTION_MARKERS)
+        has_marker = already_confirmed or any(m in raw_text.lower() for m in _CORRECTION_MARKERS)
 
         if kind == "food" and isinstance(entry, FoodEntry) and quantity_match:
             grams = float(quantity_match.group(1).replace(",", "."))
@@ -960,7 +963,7 @@ class MessagePipeline:
         await drafts.discard_draft(self.session, self.user.id)
         if "nuova" in answer:
             return await self._handle_fresh(TextContent(text=item["raw_text"]), item["raw_text"])
-        return await self._handle_correction(item["raw_text"])
+        return await self._handle_correction(item["raw_text"], already_confirmed=True)
 
     # -- reports ------------------------------------------------------------
 
