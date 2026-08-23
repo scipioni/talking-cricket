@@ -82,6 +82,25 @@ class Settings(BaseSettings):
     # answer ends the gather loop rather than looping indefinitely.
     llm_advice_max_rounds: int = 4
 
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "http://localhost:8083/api/auth/callback"
+    allowed_admin_emails: list[str] | str = ["scipio.it@gmail.com"]
+    session_secret_key: str | None = None
+
+    @field_validator("allowed_admin_emails", mode="before")
+    @classmethod
+    def _parse_allowed_admin_emails(cls, value: object) -> object:
+        if isinstance(value, str):
+            if value.startswith("[") and value.endswith("]"):
+                import json
+                try:
+                    return json.loads(value)
+                except Exception:
+                    pass
+            return [email.strip() for email in value.split(",") if email.strip()]
+        return value
+
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)

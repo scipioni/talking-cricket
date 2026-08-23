@@ -29,3 +29,21 @@ def test_explicit_override_still_applies(monkeypatch):
 
     assert settings.model_for_step("classify") == "some-small-model"
     assert settings.temperature_for_step("classify") == 0.0
+
+
+def test_google_oauth_settings_and_admin_parsing(monkeypatch):
+    monkeypatch.setenv("CALOBOT_TELEGRAM_BOT_TOKEN", "x")
+    monkeypatch.setenv("CALOBOT_GOOGLE_CLIENT_ID", "my-client-id")
+    monkeypatch.setenv("CALOBOT_GOOGLE_CLIENT_SECRET", "my-client-secret")
+    monkeypatch.setenv("CALOBOT_ALLOWED_ADMIN_EMAILS", '["a@b.com", "scipio.it@gmail.com"]')
+
+    settings = Settings()  # type: ignore[call-arg]
+
+    assert settings.google_client_id == "my-client-id"
+    assert settings.google_client_secret == "my-client-secret"
+    assert settings.allowed_admin_emails == ["a@b.com", "scipio.it@gmail.com"]
+
+    # Test comma-separated parsing fallback
+    monkeypatch.setenv("CALOBOT_ALLOWED_ADMIN_EMAILS", "test@test.com, scipio.it@gmail.com ")
+    settings_csv = Settings()  # type: ignore[call-arg]
+    assert settings_csv.allowed_admin_emails == ["test@test.com", "scipio.it@gmail.com"]

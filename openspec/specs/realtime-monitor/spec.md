@@ -39,9 +39,26 @@ The system SHALL run a WebSockets server that broadcasts all intercepted activit
 - **THEN** the system encodes the event as JSON and transmits it to the client immediately
 
 ### Requirement: Activity monitoring dashboard
-
-The system SHALL serve a web-based dashboard accessible via a standard web browser, showing a listing of active sessions and a real-time, collapsible stream of message exchanges and LLM traces for the selected session.
+The system SHALL serve a web-based private dashboard accessible only to authorized, authenticated users, showing a detailed listing of active sessions and a real-time, collapsible stream of unscrubbed message exchanges and LLM traces for the selected session.
 
 #### Scenario: Viewing the dashboard
-- **WHEN** a user visits the dashboard URL
-- **THEN** the system serves a single-page interface showing the active chat sessions and updates the UI dynamically as new events arrive
+- **WHEN** an authenticated user whose email is whitelisted visits `/private`
+- **THEN** the system serves the full, detailed telemetry stream of active chat sessions and updates the UI dynamically as new events arrive
+
+#### Scenario: Unauthorized user accesses the private dashboard
+- **WHEN** an unauthenticated visitor or an authenticated user with a non-whitelisted email visits `/private` or accesses private endpoints (e.g., `/api/sessions`, `/api/export/*`, `/telemetry/ws`)
+- **THEN** the system redirects them to the login flow or returns a `403 Forbidden` error
+
+### Requirement: Public consultation dashboard
+The system SHALL serve an unauthenticated, public web dashboard showing aggregated operational KPIs and completely anonymized/scrubbed event activity to protect user privacy.
+
+#### Scenario: Public visitor views the dashboard
+- **WHEN** an anonymous user visits `/`
+- **THEN** the system serves a public dashboard displaying aggregated metrics (active session count, average LLM latency, processing volume by intent) and a real-time stream of fully scrubbed events with no personal data
+
+### Requirement: Google OAuth2 authentication
+The system SHALL enforce secure Google OAuth2 login to authenticate admin access to private endpoints, comparing the verified user email against the whitelisted administrators list.
+
+#### Scenario: Successful admin authentication
+- **WHEN** a user completes Google OAuth2 login and their email matches the whitelist configuration
+- **THEN** the system issues a secure session token and grants access to `/private` and supporting private API endpoints
