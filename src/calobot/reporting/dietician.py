@@ -93,7 +93,7 @@ def get_dietician_signals(entries: list[FoodEntry], tz: Any) -> dict[str, Any]:
         return {}
 
     total_kcal = sum(e.kcal for e in entries)
-    total_grams = sum(e.grams for e in entries)
+    total_grams = sum(e.grams for e in entries if e.grams is not None)
     avg_density = (total_kcal / total_grams * 100) if total_grams > 0 else 0.0
 
     low_density_items: set[str] = set()

@@ -22,6 +22,9 @@ alimenti, restituiscili come elementi separati nella lista items.
 
 Per ogni alimento:
 - description: il nome dell'alimento così come inteso (in italiano)
+- stated_kcal: SOLO se l'utente indica direttamente un valore di calorie/kcal
+  (es. "100kcal di melanzane sott'olio" -> 100) - in questo caso NON compilare
+  quantity_grams né quantity_count, anche se nel messaggio appare un solo numero
 - quantity_grams: SOLO se la quantità è esplicitamente data in grammi o millilitri
 - quantity_count: SOLO se la quantità è espressa come un numero di unità
   numerabili, incluso "un/una/uno" che vale 1 (es. "due mele" -> 2, "una pesca" -> 1)

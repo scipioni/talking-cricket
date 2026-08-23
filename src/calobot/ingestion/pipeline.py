@@ -567,7 +567,14 @@ class MessagePipeline:
 
     def _food_confirmation(self, finalized) -> OutgoingMessage:
         entry = finalized.entry
-        text = f"Registrato: {entry.description} {entry.grams:.0f}g - {entry.kcal:.0f} kcal"
+        if finalized.kcal_is_stated:
+            text = f"Registrato: {entry.description} - {entry.kcal:.0f} kcal"
+            if entry.grams is not None:
+                text += f" (~{entry.grams:.0f}g stimati)"
+            else:
+                text += " (grammi non stimabili)"
+        else:
+            text = f"Registrato: {entry.description} {entry.grams:.0f}g - {entry.kcal:.0f} kcal"
         if finalized.is_estimate:
             text += " (stima)"
         if entry.provenance == Provenance.etichetta:
@@ -868,12 +875,19 @@ class MessagePipeline:
             energy = await resolve_food_energy(self.session, self.gateway, new_description)
             entry.description = new_description
             entry.kcal_per_100g = energy.kcal_per_100g
-            entry.kcal = energy.kcal_per_100g * entry.grams / 100.0
+            if entry.grams is not None:
+                entry.kcal = energy.kcal_per_100g * entry.grams / 100.0
+            elif energy.kcal_per_100g > 0:
+                # grams was unknown because kcal had been stated directly (see
+                # specs/food-logging) - kcal stays authoritative, grams is
+                # re-derived against the corrected description's density.
+                entry.grams = entry.kcal / energy.kcal_per_100g * 100.0
             entry.provenance = energy.provenance
             await self.session.flush()
+            grams_text = f"{entry.grams:.0f}g" if entry.grams is not None else "grammi non stimabili"
             return [
                 OutgoingMessage(
-                    text=f"Corretto: {entry.description} {entry.grams:.0f}g - {entry.kcal:.0f} kcal",
+                    text=f"Corretto: {entry.description} {grams_text} - {entry.kcal:.0f} kcal",
                     entry_ref=("food", entry.id),
                 )
             ]

@@ -46,6 +46,7 @@ class FinalizedFood:
     entry: FoodEntry
     is_estimate: bool
     quantity_is_estimated_from_count: bool
+    kcal_is_stated: bool
 
 
 def build_items(extraction: FoodExtraction) -> list[dict[str, Any]]:
@@ -61,6 +62,7 @@ def build_items(extraction: FoodExtraction) -> list[dict[str, Any]]:
 def _as_extraction_fields(item: dict[str, Any]) -> FoodItemExtraction:
     return FoodItemExtraction(
         description=item["description"],
+        stated_kcal=item.get("stated_kcal"),
         quantity_grams=item.get("quantity_grams"),
         quantity_count=item.get("quantity_count"),
         count_unit_hint=item.get("count_unit_hint"),
@@ -80,7 +82,10 @@ async def check_item(
 ) -> ClarificationNeeded | None:
     resolved = item.get("resolved", {})
 
-    if "portion_grams" not in resolved:
+    # A stated calorie value is enough to store the entry on its own - see
+    # specs/food-logging, "Calorie value stated directly" - so the portion-size
+    # clarification is skipped even when grams/count are also unresolved.
+    if "portion_grams" not in resolved and not is_real_quantity(item.get("stated_kcal")):
         fields = _as_extraction_fields(item)
         quantity = resolve_quantity(fields)
         if quantity is None:
@@ -158,13 +163,19 @@ async def finalize_item(
     tz,
 ) -> FinalizedFood:
     resolved = item["resolved"]
-    grams = resolved["portion_grams"]
     description = item["description"]
     if resolved.get("preparation"):
         description = f"{description} {resolved['preparation']}"
 
     energy = await resolve_food_energy(session, gateway, description)
-    kcal = energy.kcal_per_100g * grams / 100.0
+
+    kcal_is_stated = is_real_quantity(item.get("stated_kcal"))
+    if kcal_is_stated:
+        kcal = float(item["stated_kcal"])
+        grams = kcal / energy.kcal_per_100g * 100.0 if energy.kcal_per_100g > 0 else None
+    else:
+        grams = resolved["portion_grams"]
+        kcal = energy.kcal_per_100g * grams / 100.0
 
     entry = FoodEntry(
         user_id=user_id,
@@ -182,4 +193,5 @@ async def finalize_item(
         entry=entry,
         is_estimate=energy.provenance == Provenance.llm,
         quantity_is_estimated_from_count=resolved.get("quantity_is_estimated_from_count", False),
+        kcal_is_stated=kcal_is_stated,
     )

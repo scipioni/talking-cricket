@@ -127,7 +127,10 @@ class FoodEntry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     description: Mapped[str] = mapped_column(String)
-    grams: Mapped[float] = mapped_column(Float)
+    # Null when kcal was stated directly and the energy density needed to back-derive
+    # a gram amount could not be resolved - see specs/food-logging, "Calorie value
+    # stated directly".
+    grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     kcal_per_100g: Mapped[float] = mapped_column(Float)
     kcal: Mapped[float] = mapped_column(Float)
     provenance: Mapped[Provenance] = mapped_column(Enum(Provenance))

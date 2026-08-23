@@ -30,6 +30,11 @@ class Classification(BaseModel):
 
 class FoodItemExtraction(BaseModel):
     description: str
+    # Set only when the user states a calorie amount directly (e.g. "100kcal di
+    # melanzane") rather than a quantity - see specs/food-logging, "Calorie value
+    # stated directly". Kept separate from quantity_grams so the model has an
+    # explicit slot for "this number is calories, not grams".
+    stated_kcal: float | None = Field(default=None, ge=0, le=5000)
     quantity_grams: float | None = Field(default=None, ge=0, le=5000)
     quantity_count: float | None = Field(default=None, ge=0, le=50)
     count_unit_hint: str | None = None  # e.g. "mela", "uovo", "fetta"
