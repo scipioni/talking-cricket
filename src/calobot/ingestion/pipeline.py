@@ -59,7 +59,7 @@ from calobot.reporting.aggregation import (
     build_weight_report,
 )
 from calobot.reporting.charts import render_calorie_chart, render_weight_chart
-from calobot.reporting.dietician import build_dietitian_review, format_dietician_review
+from calobot.reporting.dietician import build_daily_advice, build_dietitian_review, format_dietician_review
 from calobot.reporting.periods import parse_period
 from calobot.settings import Settings
 from calobot.weight.normalizer import normalize_weight_text
@@ -432,7 +432,7 @@ class MessagePipeline:
             # Prepositions / Filler / Verbs
             "circa", "quasi", "all'incirca", "all", "incirca", "di", "da", "pesava", "pesano", "era", "erano", "sono", "un", "una", "uno", "e", "mezza", "mezzo", "più", "o", "meno", "piu", "le", "la", "il", "lo", "i", "gli", "per", "con", "a",
             # Number words
-            "un", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "venti", "trenta", "quaranta", "cinquanta", "sessanta", "settanta", "ottanta", "novanta", "cento"
+            "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "venti", "trenta", "quaranta", "cinquanta", "sessanta", "settanta", "ottanta", "novanta", "cento"
         }
 
         planner = food_planner if draft.intent == DraftIntent.food else activity_planner
@@ -977,8 +977,21 @@ class MessagePipeline:
         messages: list[OutgoingMessage] = []
 
         if extraction.topic in ("food", "all"):
+            activity_kcal_today = 0.0
+            if period == "day":
+                activity_today = await build_activity_report(
+                    self.session, self.user.id, "day", reference_day, self.tz
+                )
+                activity_kcal_today = activity_today.total_kcal if activity_today.has_data else 0.0
+
             food_report = await build_food_report(
-                self.session, self.user.id, period, reference_day, self.tz, budget_kcal
+                self.session,
+                self.user.id,
+                period,
+                reference_day,
+                self.tz,
+                budget_kcal,
+                activity_kcal_today=activity_kcal_today,
             )
             if not food_report.has_data:
                 messages.append(OutgoingMessage(text="Non ci sono dati sul cibo per questo periodo."))
@@ -988,7 +1001,13 @@ class MessagePipeline:
                     f"media giornaliera {food_report.daily_average_kcal:.0f} kcal"
                 )
                 if budget_kcal is not None:
-                    text += f" (budget {budget_kcal:.0f} kcal, differenza {food_report.difference_kcal:+.0f})"
+                    if food_report.activity_credit_kcal:
+                        text += (
+                            f" (budget {budget_kcal:.0f} kcal + {food_report.activity_credit_kcal:.0f} "
+                            f"credito attività, differenza {food_report.difference_kcal:+.0f})"
+                        )
+                    else:
+                        text += f" (budget {budget_kcal:.0f} kcal, differenza {food_report.difference_kcal:+.0f})"
                 if food_report.days_with_no_data:
                     days_text = ", ".join(d.isoformat() for d in food_report.days_with_no_data)
                     text += f"\nGiorni senza dati: {days_text}"
@@ -1002,9 +1021,22 @@ class MessagePipeline:
                     # Add dietician review for weekly/monthly food reports
                     start, end = period_bounds_utc(period, reference_day, self.tz)
                     entries = await get_entries_in_range(self.session, "food", self.user.id, start, end)
-                    review = await build_dietitian_review(self.gateway, entries, self.tz)
+                    review = await build_dietitian_review(self.gateway, entries, self.tz, period)
                     if review:
                         text += format_dietician_review(review)
+                else:
+                    start, end = period_bounds_utc(period, reference_day, self.tz)
+                    entries_today = await get_entries_in_range(self.session, "food", self.user.id, start, end)
+                    remaining_kcal = (
+                        (budget_kcal + food_report.activity_credit_kcal) - food_report.total_kcal
+                        if budget_kcal is not None
+                        else None
+                    )
+                    advice = await build_daily_advice(
+                        self.gateway, entries_today, remaining_kcal, food_report.activity_credit_kcal
+                    )
+                    if advice:
+                        text += f"\n\n💡 {advice}"
 
                 messages.append(OutgoingMessage(text=text, photo_png=photo))
 

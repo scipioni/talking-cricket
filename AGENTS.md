@@ -41,3 +41,4 @@ Prefer the `Taskfile.yml` wrappers over raw commands:
   in `pyproject.toml` before adding new suppressions.
 - Tests use an in-memory SQLite session (`tests/conftest.py`) and a stubbed LLM
   gateway — no live network/model access needed to run the suite.
+- User activity is logged to `data/interactions.jsonl`.

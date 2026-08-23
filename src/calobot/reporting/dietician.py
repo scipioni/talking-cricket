@@ -1,4 +1,5 @@
-"""Personalized behavioral dietician reports. See specs/dietician-reviews - ADDED Requirements."""
+"""Personalized behavioral dietician reports. See specs/dietician-reviews - ADDED and
+MODIFIED Requirements."""
 
 from __future__ import annotations
 
@@ -13,8 +14,26 @@ from calobot.persistence.models import Provenance
 if TYPE_CHECKING:
     from calobot.llm.gateway import LLMGateway
     from calobot.persistence.models import FoodEntry
+    from calobot.reporting.periods import Period
 
 logger = logging.getLogger(__name__)
+
+# Appended to DIETICIAN_SYSTEM_PROMPT depending on the report period, so the single
+# actionable_tip field is framed as forward-looking for a week vs. a general habit
+# for month/year (design.md - Decisions: tier the existing field, chosen in Python
+# rather than left for the model to infer from the period value).
+_WEEK_TIP_FRAMING = """
+Per il campo actionable_tip: dai un consiglio pratico su cosa fare nei GIORNI RIMANENTI
+di questa settimana, sulla base dell'andamento osservato finora.
+"""
+
+_GENERAL_HABIT_TIP_FRAMING = """
+Per il campo actionable_tip: dai un consiglio pratico su un'ABITUDINE GENERALE di salute
+da adottare, che affronti esplicitamente l'equilibrio tra proteine, grassi e carboidrati
+in modo qualitativo (es. "assicurati una fonte proteica ad ogni pasto" o "alterna
+carboidrati semplici e complessi"), senza mai indicare una quantità in grammi di un macronutriente,
+dato che Calobot non li traccia.
+"""
 
 DIETICIAN_SYSTEM_PROMPT = """Sei un nutrizionista clinico italiano, empatico, professionale e incoraggiante. Il tuo compito è analizzare il riepilogo del diario alimentare dell'utente per fornire un feedback comportamentale e nutrizionale utile, senza giudicare.
 
@@ -59,7 +78,12 @@ class DieticianReview(BaseModel):
         description="Analisi in italiano (max 3 frasi) sulla precisione del diario, evidenziando il rapporto tra fonti certe ('etichetta'/'off') ed stime ('llm')."
     )
     actionable_tip: str = Field(
-        description="Un singolo consiglio pratico, concreto e incoraggiante in italiano (max 2 frasi) per la settimana successiva."
+        description=(
+            "Un singolo consiglio pratico, concreto e incoraggiante in italiano (max 2 frasi): "
+            "per un periodo settimanale, cosa fare nei giorni rimanenti della settimana; "
+            "per un periodo mensile o annuale, un'abitudine generale di salute, incluso "
+            "l'equilibrio qualitativo tra proteine, grassi e carboidrati, senza mai indicare grammi."
+        )
     )
 
 
@@ -142,11 +166,14 @@ def get_dietician_signals(entries: list[FoodEntry], tz: Any) -> dict[str, Any]:
 
 
 async def build_dietitian_review(
-    gateway: LLMGateway, entries: list[FoodEntry], tz: Any
+    gateway: LLMGateway, entries: list[FoodEntry], tz: Any, period: Period
 ) -> DieticianReview | str | None:
     """Builds the dietician review. Returns DieticianReview if successful,
     a fallback string if there is insufficient data (< 3 distinct days logged),
-    or None if no entries exist."""
+    or None if no entries exist. `period` tiers the actionable_tip framing:
+    rest-of-week for "week", general habit (with qualitative macro balance)
+    for "month"/"year" (specs/dietician-reviews - Dietician review structured
+    schema)."""
     if not entries:
         return None
 
@@ -165,10 +192,13 @@ async def build_dietitian_review(
         f"{json.dumps(signals, indent=2, ensure_ascii=False)}"
     )
 
+    tip_framing = _WEEK_TIP_FRAMING if period == "week" else _GENERAL_HABIT_TIP_FRAMING
+    system_prompt = DIETICIAN_SYSTEM_PROMPT + tip_framing
+
     try:
         review = await gateway.call_structured(
             step="extract",
-            system_prompt=DIETICIAN_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             content=TextContent(text=prompt_content),
             schema=DieticianReview,
         )
@@ -176,6 +206,70 @@ async def build_dietitian_review(
     except Exception as exc:
         logger.error("Errore durante la generazione del parere del nutrizionista: %s", exc)
         return "Non è stato possibile generare il parere del nutrizionista in questo momento."
+
+
+DAILY_ADVICE_SYSTEM_PROMPT = """Sei un nutrizionista clinico italiano, empatico, professionale e incoraggiante.
+Dai un breve consiglio pratico su cosa mangiare o fare per il RESTO DELLA GIORNATA di oggi, sulla base di
+quanto l'utente ha già mangiato oggi e delle calorie che gli restano nel budget giornaliero (già corretto
+per l'attività fisica svolta, se presente).
+
+Calobot NON traccia i macronutrienti (carboidrati, grassi, proteine): valuta l'equilibrio del pasto solo in
+modo qualitativo dalle descrizioni dei cibi (es. se sembra mancare una fonte proteica, o se è stato tutto ad
+alta densità calorica), senza mai indicare una quantità in grammi di un macronutriente.
+
+REGOLE DI SCRITTURA:
+- Scrivi in italiano corretto, fluido ed empatico. Usa il "tu".
+- Massimo 2 frasi, concreto e realizzabile.
+- Non giudicare, non inventare dati.
+"""
+
+
+class DailyAdvice(BaseModel):
+    advice: str = Field(
+        description="Un consiglio pratico e breve in italiano (max 2 frasi) per il resto della giornata."
+    )
+
+
+async def build_daily_advice(
+    gateway: LLMGateway,
+    entries_today: list[FoodEntry],
+    remaining_kcal: float | None,
+    activity_credit_kcal: float,
+) -> str | None:
+    """Rest-of-day advice for the daily calorie report. Returns None when no food
+    was logged today, or when the LLM call fails (specs/reporting - Calorie report
+    contents: rest-of-day advice)."""
+    if not entries_today:
+        return None
+
+    foods = [
+        {"descrizione": e.description, "kcal": round(e.kcal), "kcal_per_100g": round(e.kcal_per_100g)}
+        for e in entries_today
+    ]
+
+    import json
+
+    signals: dict[str, Any] = {"cibi_mangiati_oggi": foods}
+    if remaining_kcal is not None:
+        signals["calorie_rimanenti_oggi"] = round(remaining_kcal)
+    if activity_credit_kcal:
+        signals["credito_da_attivita_fisica_kcal"] = round(activity_credit_kcal)
+
+    prompt_content = (
+        "Ecco cosa l'utente ha mangiato oggi finora:\n\n" f"{json.dumps(signals, indent=2, ensure_ascii=False)}"
+    )
+
+    try:
+        result = await gateway.call_structured(
+            step="extract",
+            system_prompt=DAILY_ADVICE_SYSTEM_PROMPT,
+            content=TextContent(text=prompt_content),
+            schema=DailyAdvice,
+        )
+        return result.advice
+    except Exception as exc:
+        logger.error("Errore durante la generazione del consiglio giornaliero: %s", exc)
+        return None
 
 
 def format_dietician_review(review: DieticianReview | str | None) -> str:

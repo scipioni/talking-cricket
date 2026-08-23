@@ -338,7 +338,11 @@ async def test_a_photo_derived_entry_appears_in_reports_like_a_typed_one(db_sess
     await client.send_photo(data=_jpeg_bytes())
     await client.say("50 grammi")
 
-    llm.push({"intent": "report", "ignored_text": None}, {"period_text": "oggi", "topic": "food"})
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": "oggi", "topic": "food"},
+        {"advice": "Continua così, magari aggiungi verdure a cena."},
+    )
     sent = await client.say("quante calorie ho mangiato oggi?")
 
     assert "215 kcal" in sent[-1].text  # 430 kcal/100g * 50g

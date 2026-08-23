@@ -15,7 +15,7 @@ import datetime as dt
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.llm.gateway import LLMGateway, ToolDefinition
@@ -24,7 +24,7 @@ from calobot.persistence.repository import get_entries_in_range
 from calobot.persistence.timeutil import day_bounds_utc, period_bounds_utc, today_in_timezone
 from calobot.profile.budget import BudgetResult
 from calobot.profile.service import current_budget
-from calobot.reporting.aggregation import build_food_report, build_weight_report
+from calobot.reporting.aggregation import build_activity_report, build_food_report, build_weight_report
 from calobot.reporting.dietician import build_dietitian_review
 from calobot.reporting.periods import Period
 
@@ -44,6 +44,10 @@ class DateRangeQuery(BaseModel):
     end_day: dt.date
 
 
+class RecentDaysQuery(BaseModel):
+    days: int = Field(default=2, ge=1, le=5)
+
+
 class NoArgs(BaseModel):
     pass
 
@@ -56,7 +60,13 @@ def _calorie_summary_handler(session: AsyncSession, user: User, tz: ZoneInfo, bu
     async def handler(args: PeriodQuery) -> dict[str, Any]:
         reference_day = _resolve_reference_day(args, tz)
         budget_kcal = budget.target_kcal if budget else None
-        report = await build_food_report(session, user.id, args.period, reference_day, tz, budget_kcal)
+        activity_kcal_today = 0.0
+        if args.period == "day":
+            activity_today = await build_activity_report(session, user.id, "day", reference_day, tz)
+            activity_kcal_today = activity_today.total_kcal if activity_today.has_data else 0.0
+        report = await build_food_report(
+            session, user.id, args.period, reference_day, tz, budget_kcal, activity_kcal_today=activity_kcal_today
+        )
         if not report.has_data:
             return {
                 "no_data": True,
@@ -121,7 +131,7 @@ def _dietician_review_handler(
         reference_day = _resolve_reference_day(args, tz)
         start, end = period_bounds_utc(args.period, reference_day, tz)
         entries = await get_entries_in_range(session, "food", user.id, start, end)
-        review = await build_dietitian_review(gateway, entries, tz)
+        review = await build_dietitian_review(gateway, entries, tz, args.period)
         if review is None:
             return {"no_data": True, "period": args.period, "reference_day": reference_day.isoformat()}
         if isinstance(review, str):
@@ -161,6 +171,37 @@ def _list_entries_handler(session: AsyncSession, user: User, tz: ZoneInfo):
     return handler
 
 
+def _recent_food_descriptions_handler(session: AsyncSession, user: User, tz: ZoneInfo):
+    """Backs `get_recent_food_descriptions`: a relative-days window resolved
+    server-side (like the period tools' `reference_day`), so the model never has to
+    produce an absolute date the way `list_food_entries` requires (design.md -
+    Decisions)."""
+
+    async def handler(args: RecentDaysQuery) -> dict[str, Any]:
+        today = today_in_timezone(tz)
+        start, _ = day_bounds_utc(today - dt.timedelta(days=args.days), tz)
+        _, end = day_bounds_utc(today, tz)
+        entries = await get_entries_in_range(session, "food", user.id, start, end)
+        if not entries:
+            return {"no_data": True, "days": args.days}
+        capped = entries[:MAX_LISTED_ENTRIES]
+        return {
+            "no_data": False,
+            "truncated": len(entries) > MAX_LISTED_ENTRIES,
+            "days": args.days,
+            "entries": [
+                {
+                    "description": e.description,
+                    "kcal": round(e.kcal),
+                    "day": e.consumed_at.astimezone(tz).date().isoformat(),
+                }
+                for e in capped
+            ],
+        }
+
+    return handler
+
+
 def _profile_and_budget_handler(
     session: AsyncSession, user: User, tz: ZoneInfo, budget: BudgetResult | None
 ):
@@ -168,14 +209,18 @@ def _profile_and_budget_handler(
         if budget is None:
             return {"no_data": True, "reason": "profilo non ancora completo: budget non calcolabile"}
         today = today_in_timezone(tz)
-        food_today = await build_food_report(session, user.id, "day", today, tz, budget.target_kcal)
+        activity_today = await build_activity_report(session, user.id, "day", today, tz)
+        activity_kcal_today = activity_today.total_kcal if activity_today.has_data else 0.0
+        food_today = await build_food_report(
+            session, user.id, "day", today, tz, budget.target_kcal, activity_kcal_today=activity_kcal_today
+        )
         eaten_today = food_today.total_kcal if food_today.has_data else 0.0
         return {
             "no_data": False,
             "daily_budget_kcal": round(budget.target_kcal),
             "goal_kg": user.peso_obiettivo_kg,
             "eaten_today_kcal": round(eaten_today),
-            "remaining_today_kcal": round(budget.target_kcal - eaten_today),
+            "remaining_today_kcal": round(budget.target_kcal + food_today.activity_credit_kcal - eaten_today),
         }
 
     return handler
@@ -219,11 +264,21 @@ async def build_tool_registry(
         ToolDefinition(
             name="list_food_entries",
             description=(
-                "Elenco dei singoli pasti registrati tra due date, con descrizione, "
-                "grammi, calorie e ora del pasto."
+                "Elenco dei singoli pasti registrati in un intervallo di date preciso "
+                "(richiede due date esatte), con descrizione, grammi, calorie e ora del pasto."
             ),
             args_schema=DateRangeQuery,
             handler=_list_entries_handler(session, user, tz),
+        ),
+        ToolDefinition(
+            name="get_recent_food_descriptions",
+            description=(
+                "Descrizioni e calorie dei pasti registrati negli ultimi N giorni da oggi "
+                "(nessuna data da calcolare): utile per valutare varieta' e bilanciamento "
+                "recente prima di suggerire cosa mangiare."
+            ),
+            args_schema=RecentDaysQuery,
+            handler=_recent_food_descriptions_handler(session, user, tz),
         ),
         ToolDefinition(
             name="get_profile_and_budget",

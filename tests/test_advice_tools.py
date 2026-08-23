@@ -8,8 +8,8 @@ import datetime as dt
 
 from harness.state import create_onboarded_user
 
-from calobot.advice.tools import DateRangeQuery, NoArgs, PeriodQuery, build_tool_registry
-from calobot.persistence.models import FoodEntry, Provenance
+from calobot.advice.tools import DateRangeQuery, NoArgs, PeriodQuery, RecentDaysQuery, build_tool_registry
+from calobot.persistence.models import ActivityEntry, FoodEntry, Provenance
 from calobot.persistence.seed import seed_all
 
 
@@ -22,6 +22,18 @@ def _make_entry(user_id: int, description: str, grams: float, kcal_per_100g: flo
         kcal=kcal_per_100g * grams / 100.0,
         provenance=Provenance.tabella,
         consumed_at=when,
+    )
+
+
+def _make_activity(user_id: int, kcal: float, when: dt.datetime):
+    return ActivityEntry(
+        user_id=user_id,
+        activity="camminata",
+        duration_minutes=60,
+        met=4.0,
+        kcal=kcal,
+        provenance=Provenance.tabella,
+        performed_at=when,
     )
 
 
@@ -44,6 +56,31 @@ async def test_calorie_summary_reports_totals_matching_the_report_path(db_sessio
 
     assert result["no_data"] is False
     assert result["total_kcal"] == round(52 * 150 / 100.0)
+
+
+async def test_calorie_summary_day_period_includes_activity_credit(db_session, settings, llm):
+    from calobot.persistence.timeutil import today_in_timezone
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    today = today_in_timezone(settings.timezone)
+    today_dt = dt.datetime.combine(today, dt.time(12, 0), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "mela", 150, 52, today_dt))
+    db_session.add(_make_activity(user.id, 800.0, today_dt))
+    await db_session.flush()
+
+    budget = await current_budget(db_session, user)
+    expected_credit = min(0.5 * 800.0, 600.0)
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    day_result = await tools["get_calorie_summary"].handler(PeriodQuery(period="day", reference_day=today))
+    week_result = await tools["get_calorie_summary"].handler(PeriodQuery(period="week", reference_day=today))
+
+    assert day_result["no_data"] is False
+    assert day_result["difference_kcal"] == round(78.0 - (budget.target_kcal + expected_credit))
+    # Week period is unaffected by the day's logged activity.
+    assert week_result["difference_kcal"] == round(78.0 - budget.target_kcal)
 
 
 async def test_calorie_summary_reports_no_data_for_an_empty_period(db_session, settings, llm):
@@ -122,6 +159,72 @@ async def test_profile_and_budget_reports_the_current_budget(db_session, setting
     assert result["no_data"] is False
     assert result["daily_budget_kcal"] > 0
     assert result["goal_kg"] == user.peso_obiettivo_kg
+
+
+async def test_profile_and_budget_remaining_kcal_includes_activity_credit(db_session, settings, llm):
+    from calobot.persistence.timeutil import today_in_timezone
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    today = today_in_timezone(settings.timezone)
+    today_dt = dt.datetime.combine(today, dt.time(12, 0), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "mela", 150, 52, today_dt))
+    db_session.add(_make_activity(user.id, 800.0, today_dt))
+    await db_session.flush()
+
+    budget = await current_budget(db_session, user)
+    expected_credit = min(0.5 * 800.0, 600.0)
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_profile_and_budget"].handler(NoArgs())
+
+    assert result["no_data"] is False
+    assert result["eaten_today_kcal"] == 78
+    assert result["remaining_today_kcal"] == round(budget.target_kcal + expected_credit - 78.0)
+
+
+def test_recent_days_query_rejects_out_of_range_values():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        RecentDaysQuery(days=0)
+    with pytest.raises(ValidationError):
+        RecentDaysQuery(days=6)
+    assert RecentDaysQuery(days=1).days == 1
+    assert RecentDaysQuery().days == 2
+
+
+async def test_recent_food_descriptions_returns_entries_within_window(db_session, settings, llm):
+    from calobot.persistence.timeutil import today_in_timezone
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    today = today_in_timezone(settings.timezone)
+    today_dt = dt.datetime.combine(today, dt.time(12, 0), tzinfo=dt.UTC)
+    old_dt = dt.datetime.combine(today - dt.timedelta(days=10), dt.time(12, 0), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "pollo alla griglia", 150, 165, today_dt))
+    db_session.add(_make_entry(user.id, "riso in bianco troppo vecchio", 100, 130, old_dt))
+    await db_session.flush()
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_recent_food_descriptions"].handler(RecentDaysQuery(days=2))
+
+    assert result["no_data"] is False
+    descriptions = [e["description"] for e in result["entries"]]
+    assert "pollo alla griglia" in descriptions
+    assert "riso in bianco troppo vecchio" not in descriptions
+
+
+async def test_recent_food_descriptions_reports_no_data_when_nothing_logged(db_session, settings, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_recent_food_descriptions"].handler(RecentDaysQuery(days=2))
+
+    assert result["no_data"] is True
 
 
 async def test_no_tool_schema_exposes_a_user_identifier(db_session, settings, llm):

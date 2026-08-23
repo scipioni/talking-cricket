@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from calobot.persistence.models import FoodEntry, Provenance
 from calobot.reporting.dietician import (
     DieticianReview,
+    build_daily_advice,
     build_dietitian_review,
     get_dietician_signals,
 )
@@ -115,7 +117,7 @@ def test_get_dietician_signals_computes_correct_nutritional_metrics():
 
 async def test_build_dietitian_review_returns_none_for_empty_entries():
     mock_gateway = AsyncMock()
-    review = await build_dietitian_review(mock_gateway, [], TZ_ROME)
+    review = await build_dietitian_review(mock_gateway, [], TZ_ROME, "week")
     assert review is None
 
 
@@ -126,7 +128,7 @@ async def test_build_dietitian_review_enforces_minimum_days_requirement():
         _make_entry("Pasta", 100, 350, Provenance.tabella, dt.datetime(2026, 8, 17, 13, 0)),
     ]
     # Only 1 unique day logged (Aug 17)
-    review = await build_dietitian_review(mock_gateway, entries, TZ_ROME)
+    review = await build_dietitian_review(mock_gateway, entries, TZ_ROME, "week")
     assert "Per darti un parere nutrizionale personalizzato" in review
     mock_gateway.call_structured.assert_not_called()
 
@@ -148,9 +150,118 @@ async def test_build_dietitian_review_calls_gateway_successfully():
         _make_entry("Insalata", 200, 20, Provenance.tabella, dt.datetime(2026, 8, 19, 20, 0)),
     ]
 
-    review = await build_dietitian_review(mock_gateway, entries, TZ_ROME)
+    review = await build_dietitian_review(mock_gateway, entries, TZ_ROME, "week")
     assert review == expected_review
     mock_gateway.call_structured.assert_called_once()
+
+
+async def test_build_dietitian_review_uses_rest_of_week_framing_for_week_period():
+    mock_gateway = AsyncMock()
+    mock_gateway.call_structured.return_value = DieticianReview(
+        summary="s", density_insight="d", temporal_pattern_insight="t", sourcing_insight="so", actionable_tip="a"
+    )
+    entries = [
+        _make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)),
+        _make_entry("Pasta", 100, 350, Provenance.tabella, dt.datetime(2026, 8, 18, 13, 0)),
+        _make_entry("Insalata", 200, 20, Provenance.tabella, dt.datetime(2026, 8, 19, 20, 0)),
+    ]
+
+    await build_dietitian_review(mock_gateway, entries, TZ_ROME, "week")
+
+    system_prompt = mock_gateway.call_structured.call_args.kwargs["system_prompt"]
+    assert "GIORNI RIMANENTI" in system_prompt
+    assert "ABITUDINE GENERALE" not in system_prompt
+
+
+async def test_build_dietitian_review_uses_general_habit_framing_for_month_and_year_periods():
+    mock_gateway = AsyncMock()
+    mock_gateway.call_structured.return_value = DieticianReview(
+        summary="s", density_insight="d", temporal_pattern_insight="t", sourcing_insight="so", actionable_tip="a"
+    )
+    entries = [
+        _make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)),
+        _make_entry("Pasta", 100, 350, Provenance.tabella, dt.datetime(2026, 8, 18, 13, 0)),
+        _make_entry("Insalata", 200, 20, Provenance.tabella, dt.datetime(2026, 8, 19, 20, 0)),
+    ]
+
+    for period in ("month", "year"):
+        mock_gateway.call_structured.reset_mock()
+        await build_dietitian_review(mock_gateway, entries, TZ_ROME, period)
+        system_prompt = mock_gateway.call_structured.call_args.kwargs["system_prompt"]
+        assert "ABITUDINE GENERALE" in system_prompt
+        assert "grammi di un macronutriente" in system_prompt
+        assert "GIORNI RIMANENTI" not in system_prompt
+
+
+# Guards against the model stating a specific macronutrient gram amount despite
+# instructions (design.md - Risks: "Non inventare dati o macronutrienti"). Matches
+# a digit-plus-gram token within a short window of a macronutrient word, in either
+# order ("30g di proteine" / "proteine: 30 grammi").
+_MACRO_GRAM_CLAIM = re.compile(
+    r"(\d+\s*(g|gr|grammi)\b.{0,25}(protein|grass|carboidrat))"
+    r"|((protein|grass|carboidrat)\w*.{0,25}\d+\s*(g|gr|grammi)\b)",
+    re.IGNORECASE,
+)
+
+
+def test_macro_gram_claim_regex_flags_a_specific_gram_amount():
+    assert _MACRO_GRAM_CLAIM.search("Oggi hai mangiato 30g di proteine, ottimo lavoro.")
+    assert _MACRO_GRAM_CLAIM.search("Cerca di assumere proteine: 50 grammi al giorno.")
+
+
+def test_macro_gram_claim_regex_allows_qualitative_advice():
+    assert not _MACRO_GRAM_CLAIM.search(
+        "Assicurati una fonte proteica ad ogni pasto e alterna carboidrati semplici e complessi."
+    )
+
+
+async def test_general_habit_tip_from_stubbed_output_has_no_macro_gram_claim():
+    mock_gateway = AsyncMock()
+    mock_gateway.call_structured.return_value = DieticianReview(
+        summary="s",
+        density_insight="d",
+        temporal_pattern_insight="t",
+        sourcing_insight="so",
+        actionable_tip="Assicurati una fonte proteica ad ogni pasto, variando anche i carboidrati.",
+    )
+    entries = [
+        _make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)),
+        _make_entry("Pasta", 100, 350, Provenance.tabella, dt.datetime(2026, 8, 18, 13, 0)),
+        _make_entry("Insalata", 200, 20, Provenance.tabella, dt.datetime(2026, 8, 19, 20, 0)),
+    ]
+
+    review = await build_dietitian_review(mock_gateway, entries, TZ_ROME, "month")
+
+    assert not _MACRO_GRAM_CLAIM.search(review.actionable_tip)
+
+
+async def test_build_daily_advice_returns_none_for_no_entries():
+    mock_gateway = AsyncMock()
+    advice = await build_daily_advice(mock_gateway, [], remaining_kcal=1500.0, activity_credit_kcal=0.0)
+    assert advice is None
+    mock_gateway.call_structured.assert_not_called()
+
+
+async def test_build_daily_advice_returns_text_on_success():
+    mock_gateway = AsyncMock()
+    from calobot.reporting.dietician import DailyAdvice
+
+    mock_gateway.call_structured.return_value = DailyAdvice(advice="Aggiungi una fonte proteica stasera.")
+    entries = [_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0))]
+
+    advice = await build_daily_advice(mock_gateway, entries, remaining_kcal=500.0, activity_credit_kcal=200.0)
+
+    assert advice == "Aggiungi una fonte proteica stasera."
+
+
+async def test_build_daily_advice_falls_back_to_none_on_llm_error():
+    mock_gateway = AsyncMock()
+    mock_gateway.call_structured.side_effect = RuntimeError("boom")
+    entries = [_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0))]
+
+    advice = await build_daily_advice(mock_gateway, entries, remaining_kcal=500.0, activity_credit_kcal=0.0)
+
+    assert advice is None
 
 
 async def test_weekly_report_triggers_dietician_review(db_session, client, llm):

@@ -10,6 +10,7 @@ on top.
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from harness.llm import ScriptedLLM, ToolCall, ToolCallsResponse
 from harness.state import create_onboarded_user
@@ -517,6 +518,83 @@ async def test_recipe_suggestion_when_over_budget_provides_empathetic_counseling
     assert "brodo" in sent[-1].text
     offered_names = [tc["function"]["name"] for tc in llm.calls[1]["tools"]]
     assert "get_profile_and_budget" in offered_names
+    run.assert_clean()
+
+
+# -- recipe suggestion also considers recent variety (budget-include-activity-kcal
+# follow-up: advice-meal-suggestion-recent-history) -------------------------------
+
+
+async def test_recipe_suggestion_considers_recent_food_variety(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+    llm.push_agent_turn(
+        [
+            [
+                ToolCall(name="get_profile_and_budget", arguments={}, id="call_1"),
+                ToolCall(name="get_recent_food_descriptions", arguments={"days": 2}, id="call_2"),
+            ]
+        ],
+        final={
+            "answer_text": (
+                "Oggi ti rimangono 400 kcal. Negli ultimi giorni non hai avuto una vera fonte "
+                "proteica, quindi ti consiglio del pollo alla piastra con verdure."
+            ),
+            "used_data": True,
+            "declined_reason": None,
+        },
+    )
+
+    sent = await run.say("cosa mi consigli di mangiare questa sera?")
+
+    assert "400" in sent[-1].text
+    assert "pollo" in sent[-1].text
+    assert "grammi" not in sent[-1].text.lower()
+    offered_names = [tc["function"]["name"] for tc in llm.calls[1]["tools"]]
+    assert "get_profile_and_budget" in offered_names
+    assert "get_recent_food_descriptions" in offered_names
+    run.assert_clean()
+
+
+# Guards against the narrated meal suggestion stating a specific macronutrient gram
+# amount (design.md - Risks). Matches a digit-plus-gram token within a short window
+# of a macronutrient word, in either order.
+_MACRO_GRAM_CLAIM = re.compile(
+    r"(\d+\s*(g|gr|grammi)\b.{0,25}(protein|grass|carboidrat))"
+    r"|((protein|grass|carboidrat)\w*.{0,25}\d+\s*(g|gr|grammi)\b)",
+    re.IGNORECASE,
+)
+
+
+async def test_recipe_suggestion_narration_has_no_macro_gram_claim(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+    llm.push_agent_turn(
+        [
+            [
+                ToolCall(name="get_profile_and_budget", arguments={}, id="call_1"),
+                ToolCall(name="get_recent_food_descriptions", arguments={"days": 2}, id="call_2"),
+            ]
+        ],
+        final={
+            "answer_text": (
+                "Oggi ti rimangono 400 kcal. Assicurati una fonte proteica a cena, "
+                "ad esempio del pollo alla piastra con verdure."
+            ),
+            "used_data": True,
+            "declined_reason": None,
+        },
+    )
+
+    sent = await run.say("cosa mi consigli di mangiare questa sera?")
+
+    assert not _MACRO_GRAM_CLAIM.search(sent[-1].text)
     run.assert_clean()
 
 

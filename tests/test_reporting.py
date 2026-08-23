@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from calobot.persistence.models import ActivityEntry, FoodEntry, Provenance, WeightEntry
 from calobot.persistence.repository import create_user
 from calobot.reporting.aggregation import (
+    activity_credit_kcal,
     build_activity_report,
     build_food_report,
     build_weight_report,
@@ -197,4 +198,68 @@ async def test_food_report_daily_rolling_average(db_session):
     # Average should be the 7-day average of logged days: (52 + 89 + 250) / 3 = 130.333...
     assert abs(report.daily_average_kcal - 130.33) < 0.1
     # Difference should be today's total minus budget: 52 - 2000 = -1948
+    assert report.difference_kcal == 52.0 - budget_kcal
+
+
+def test_activity_credit_kcal_below_cap():
+    assert activity_credit_kcal(200) == 100.0
+
+
+def test_activity_credit_kcal_at_cap():
+    assert activity_credit_kcal(1200) == 600.0
+
+
+def test_activity_credit_kcal_above_cap():
+    assert activity_credit_kcal(5000) == 600.0
+
+
+def test_activity_credit_kcal_zero():
+    assert activity_credit_kcal(0) == 0.0
+
+
+async def test_food_report_day_period_credits_activity_kcal(db_session):
+    user = await create_user(db_session, telegram_user_id=11)
+    today = dt.datetime.now(TZ)
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=100,
+            kcal_per_100g=52,
+            kcal=52.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    await db_session.flush()
+
+    budget_kcal = 2000.0
+    report = await build_food_report(
+        db_session, user.id, "day", today.date(), TZ, budget_kcal=budget_kcal, activity_kcal_today=800.0
+    )
+    assert report.activity_credit_kcal == 400.0
+    assert report.difference_kcal == 52.0 - (budget_kcal + 400.0)
+
+
+async def test_food_report_week_period_ignores_activity_kcal(db_session):
+    user = await create_user(db_session, telegram_user_id=12)
+    today = dt.datetime.now(TZ)
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=100,
+            kcal_per_100g=52,
+            kcal=52.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    await db_session.flush()
+
+    budget_kcal = 2000.0
+    report = await build_food_report(
+        db_session, user.id, "week", today.date(), TZ, budget_kcal=budget_kcal, activity_kcal_today=800.0
+    )
+    assert report.activity_credit_kcal == 0.0
     assert report.difference_kcal == 52.0 - budget_kcal

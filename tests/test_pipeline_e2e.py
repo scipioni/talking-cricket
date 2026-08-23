@@ -211,7 +211,8 @@ async def test_report_message_end_to_end(db_session, client, llm):
 async def test_report_daily_rolling_average_and_weight_formatting(db_session, client, llm):
     import datetime as dt
     from zoneinfo import ZoneInfo
-    from calobot.persistence.models import FoodEntry, WeightEntry, Provenance
+
+    from calobot.persistence.models import FoodEntry, Provenance
     from calobot.profile.service import current_budget
 
     await seed_all(db_session)
@@ -249,6 +250,7 @@ async def test_report_daily_rolling_average_and_weight_formatting(db_session, cl
     llm.push(
         {"intent": "report", "ignored_text": None},
         {"period_text": None, "topic": "all"},
+        {"advice": "Prova a includere una fonte proteica per il resto della giornata."},
     )
 
     sent = await client.say("report di oggi")
@@ -259,6 +261,7 @@ async def test_report_daily_rolling_average_and_weight_formatting(db_session, cl
     food_msg = next(msg for msg in sent if "Calorie" in msg.text)
     assert "totale 467 kcal" in food_msg.text
     assert "media giornaliera 500 kcal" in food_msg.text
+    assert "Prova a includere una fonte proteica" in food_msg.text
 
     budget = await current_budget(db_session, user)
     budget_kcal = budget.target_kcal if budget else None
@@ -273,8 +276,154 @@ async def test_report_daily_rolling_average_and_weight_formatting(db_session, cl
     assert "mancano -1.0 kg" in weight_msg.text or "mancano 1.0 kg" in weight_msg.text
 
 
+async def test_daily_report_shows_activity_credit_when_activity_logged(db_session, client, llm):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from calobot.persistence.models import ActivityEntry, FoodEntry, Provenance
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tz = ZoneInfo("Europe/Rome")
+    today = dt.datetime.now(tz)
+
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=150,
+            kcal_per_100g=52,
+            kcal=78.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    db_session.add(
+        ActivityEntry(
+            user_id=user.id,
+            activity="camminata",
+            duration_minutes=120,
+            met=4.0,
+            kcal=800.0,
+            provenance=Provenance.tabella,
+            performed_at=today,
+        )
+    )
+    await db_session.flush()
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "food"},
+        {"advice": "Prova ad aggiungere una fonte proteica stasera."},
+    )
+
+    sent = await client.say("report di oggi")
+
+    assert len(sent) == 1
+    text = sent[0].text
+
+    budget = await current_budget(db_session, user)
+    expected_credit = min(0.5 * 800.0, 600.0)
+    expected_diff = 78.0 - (budget.target_kcal + expected_credit)
+
+    assert f"{expected_credit:.0f} credito attività" in text
+    assert f"differenza {expected_diff:+.0f}" in text
+    assert "Prova ad aggiungere una fonte proteica stasera." in text
+
+
+async def test_daily_report_text_unchanged_with_no_activity_logged(db_session, client, llm):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from calobot.persistence.models import FoodEntry, Provenance
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tz = ZoneInfo("Europe/Rome")
+    today = dt.datetime.now(tz)
+
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=150,
+            kcal_per_100g=52,
+            kcal=78.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    await db_session.flush()
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "food"},
+        {"advice": "Continua così."},
+    )
+
+    sent = await client.say("report di oggi")
+
+    assert len(sent) == 1
+    text = sent[0].text
+
+    budget = await current_budget(db_session, user)
+    expected_diff = 78.0 - budget.target_kcal
+
+    assert "credito attività" not in text
+    assert f"differenza {expected_diff:+.0f})" in text
+
+
+async def test_daily_report_omits_advice_line_when_advice_call_fails(db_session, client, llm):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from calobot.persistence.models import FoodEntry, Provenance
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tz = ZoneInfo("Europe/Rome")
+    today = dt.datetime.now(tz)
+
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="mela",
+            grams=150,
+            kcal_per_100g=52,
+            kcal=78.0,
+            provenance=Provenance.tabella,
+            consumed_at=today,
+        )
+    )
+    await db_session.flush()
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "food"},
+        RuntimeError("boom"),
+    )
+
+    sent = await client.say("report di oggi")
+
+    assert len(sent) == 1
+    text = sent[0].text
+
+    budget = await current_budget(db_session, user)
+    expected_diff = 78.0 - budget.target_kcal
+
+    assert f"differenza {expected_diff:+.0f})" in text
+    assert "💡" not in text
+
+
 async def test_new_food_cancels_existing_draft_even_if_it_has_a_number(db_session, client, llm):
     from sqlalchemy import select
+
     from calobot.persistence.models import FoodEntry
 
     await seed_all(db_session)

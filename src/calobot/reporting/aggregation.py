@@ -13,10 +13,20 @@ from calobot.persistence.repository import (
     get_entries_in_range,
     get_weight_entries_in_range,
 )
-from calobot.persistence.timeutil import period_bounds_utc, today_local, start_of_day_utc
+from calobot.persistence.timeutil import period_bounds_utc, start_of_day_utc, today_local
 from calobot.reporting.periods import Period
 
 MIN_MEASUREMENTS_FOR_TREND = 3
+
+# Day-period only: a day's logged activity kcal is credited back onto the budget
+# before comparing against food eaten, capped and fractional to offset the known
+# tendency of LLM-estimated activity kcal to run high (design.md - Decisions).
+ACTIVITY_CREDIT_FRACTION = 0.5
+ACTIVITY_CREDIT_CAP_KCAL = 600
+
+
+def activity_credit_kcal(activity_kcal: float) -> float:
+    return min(ACTIVITY_CREDIT_FRACTION * activity_kcal, ACTIVITY_CREDIT_CAP_KCAL)
 
 
 @dataclass(frozen=True)
@@ -27,6 +37,7 @@ class FoodReport:
     difference_kcal: float | None
     days_with_no_data: list[dt.date]
     has_data: bool
+    activity_credit_kcal: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -65,7 +76,14 @@ def _all_days_in_range(start_day: dt.date, end_day: dt.date) -> list[dt.date]:
 
 
 async def build_food_report(
-    session: AsyncSession, user_id: int, period: Period, reference_day: dt.date, tz, budget_kcal: float | None
+    session: AsyncSession,
+    user_id: int,
+    period: Period,
+    reference_day: dt.date,
+    tz,
+    budget_kcal: float | None,
+    *,
+    activity_kcal_today: float = 0.0,
 ) -> FoodReport:
     start, end = period_bounds_utc(period, reference_day, tz)
     entries = await get_entries_in_range(session, "food", user_id, start, end)
@@ -88,6 +106,7 @@ async def build_food_report(
     days_with_no_data = [d for d in all_days if d not in days_with_data and d <= today_local()]
 
     num_days_counted = max(len(days_with_data), 1)
+    credit = 0.0
     if period == "day":
         start_7d = start_of_day_utc(reference_day - dt.timedelta(days=6), tz)
         end_7d = start_of_day_utc(reference_day + dt.timedelta(days=1), tz)
@@ -96,7 +115,8 @@ async def build_food_report(
         num_days_counted = max(len(avg_days_with_data), 1)
         avg_total = sum(e.kcal for e in avg_entries)
         average = avg_total / num_days_counted
-        difference = (total - budget_kcal) if budget_kcal is not None else None
+        credit = activity_credit_kcal(activity_kcal_today)
+        difference = (total - (budget_kcal + credit)) if budget_kcal is not None else None
     else:
         average = total / num_days_counted
         difference = (average - budget_kcal) if budget_kcal is not None else None
@@ -108,6 +128,7 @@ async def build_food_report(
         difference_kcal=difference,
         days_with_no_data=days_with_no_data,
         has_data=True,
+        activity_credit_kcal=credit,
     )
 
 
