@@ -28,3 +28,9 @@ async def test_retrieve_met_candidates_finds_camminata(db_session):
     await seed_all(db_session)
     candidates = await retrieve_met_candidates(db_session, "camminata veloce")
     assert any(c.name_it == "camminata" for c in candidates)
+
+
+async def test_retrieve_met_candidates_finds_bicicletta_elettrica(db_session):
+    await seed_all(db_session)
+    candidates = await retrieve_met_candidates(db_session, "bicicletta elettrica")
+    assert any(c.name_it == "bicicletta elettrica" for c in candidates)

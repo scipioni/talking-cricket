@@ -264,13 +264,15 @@ async def test_build_daily_advice_falls_back_to_none_on_llm_error():
     assert advice is None
 
 
-async def test_weekly_report_triggers_dietician_review(db_session, client, llm):
+async def test_weekly_report_triggers_dietician_review(db_session, client, llm, clock):
     from harness.state import create_onboarded_user
 
     from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
+
+    clock.set_local(dt.datetime(2026, 8, 20, 12, 0), TZ_ROME)
 
     # Add entries on 3 distinct days: Aug 17, 18, 19
     db_session.add(_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)))
@@ -302,13 +304,15 @@ async def test_weekly_report_triggers_dietician_review(db_session, client, llm):
     assert "Continua così!" in text
 
 
-async def test_weekly_report_with_insufficient_days_bypasses_llm_with_warning(db_session, client, llm):
+async def test_weekly_report_with_insufficient_days_bypasses_llm_with_warning(db_session, client, llm, clock):
     from harness.state import create_onboarded_user
 
     from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
+
+    clock.set_local(dt.datetime(2026, 8, 20, 12, 0), TZ_ROME)
 
     # Only 1 day logged (Aug 17)
     db_session.add(_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)))
@@ -327,13 +331,15 @@ async def test_weekly_report_with_insufficient_days_bypasses_llm_with_warning(db
     assert "Per darti un parere nutrizionale personalizzato" in text
 
 
-async def test_single_day_report_bypasses_dietician_completely(db_session, client, llm):
+async def test_single_day_report_bypasses_dietician_completely(db_session, client, llm, clock):
     from harness.state import create_onboarded_user
 
     from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
+
+    clock.set_local(dt.datetime(2026, 8, 19, 23, 0), TZ_ROME)
 
     # Add entries on 3 distinct days: Aug 17, 18, 19
     db_session.add(_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)))
@@ -353,13 +359,15 @@ async def test_single_day_report_bypasses_dietician_completely(db_session, clien
     assert "IL PARERE DEL NUTRIZIONISTA" not in text
 
 
-async def test_weekly_report_splits_if_review_is_too_long(db_session, client, llm):
+async def test_weekly_report_splits_if_review_is_too_long(db_session, client, llm, clock):
     from harness.state import create_onboarded_user
 
     from calobot.persistence.seed import seed_all
 
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
+
+    clock.set_local(dt.datetime(2026, 8, 20, 12, 0), TZ_ROME)
 
     # Add entries on 3 distinct days: Aug 17, 18, 19
     db_session.add(_make_entry("Mela", 150, 52, Provenance.tabella, dt.datetime(2026, 8, 17, 10, 0)))
