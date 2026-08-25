@@ -164,8 +164,9 @@ async def finalize_item(
 ) -> FinalizedFood:
     resolved = item["resolved"]
     description = item["description"]
-    if resolved.get("preparation"):
-        description = f"{description} {resolved['preparation']}"
+    preparation = resolved.get("preparation") or item.get("preparation")
+    if preparation:
+        description = f"{description} {preparation}"
 
     energy = await resolve_food_energy(session, gateway, description)
 
@@ -179,7 +180,7 @@ async def finalize_item(
 
     entry = FoodEntry(
         user_id=user_id,
-        description=item["description"],
+        description=description,
         grams=grams,
         kcal_per_100g=energy.kcal_per_100g,
         kcal=kcal,

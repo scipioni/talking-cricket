@@ -38,9 +38,7 @@ async def test_food_with_vague_portion_asks_then_stores(db_session, client, llm)
 
     llm.push(
         {"intent": "food", "ignored_text": None},
-        food_extraction(
-            description="pasta al pesto", quantity_grams=None, household_measure="un piatto"
-        ),
+        food_extraction(description="pasta al pesto", quantity_grams=None, household_measure="un piatto"),
     )
 
     sent = await client.say("un piatto di pasta al pesto")
@@ -432,9 +430,7 @@ async def test_new_food_cancels_existing_draft_even_if_it_has_a_number(db_sessio
     # 1. User says "ho mangiato un avocado" (which lacks a portion weight)
     llm.push(
         {"intent": "food", "ignored_text": None},
-        food_extraction(
-            description="avocado", quantity_grams=None, household_measure="un frutto"
-        ),
+        food_extraction(description="avocado", quantity_grams=None, household_measure="un frutto"),
     )
     first_reply = await client.say("ho mangiato un avocado")
     assert "avocado" in first_reply[0].text
@@ -447,7 +443,7 @@ async def test_new_food_cancels_existing_draft_even_if_it_has_a_number(db_sessio
     # - discard the avocado draft and output cancellation notice
     # - process "Cetriolo 10g" freshly: classify -> extract -> resolve candidates -> resolve energy
     cetriolo_ext = food_extraction(description="cetriolo", quantity_grams=10)
-    
+
     llm.push(
         # Under open draft: classify the input "Cetriolo 10g"
         {"intent": "food", "ignored_text": None},
@@ -481,3 +477,39 @@ async def test_new_food_cancels_existing_draft_even_if_it_has_a_number(db_sessio
     assert entries[0].description == "cetriolo"
     assert entries[0].grams == 10
 
+
+async def test_cooked_pasta_preparation_preserved_and_resolved(db_session, client, llm):
+    from sqlalchemy import select
+
+    from calobot.persistence.models import FoodEntry
+
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    # User logs 180g of cooked pasta.
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(
+            description="pasta",
+            quantity_grams=180,
+            preparation="cotta",
+        ),
+        # Since the preparation is already "cotta", it is appended to form "pasta cotta"
+        # and used to match candidates. "Pasta cooked" (id=60) matches perfectly.
+        {"selected_candidate_id": 60},
+    )
+
+    sent = await client.say("180g di pasta pesata cotta")
+
+    assert len(sent) == 1
+    # Check that "pasta cotta" and correct calories (180 * 1.58 = 284.4 -> ~284 kcal) are registered
+    assert "pasta cotta" in sent[0].text.lower()
+    assert "284 kcal" in sent[0].text
+
+    # Verify what was stored in the database
+    db_session.expire_all()
+    entries = list((await db_session.execute(select(FoodEntry))).scalars())
+    assert len(entries) == 1
+    assert entries[0].description == "pasta cotta"
+    assert entries[0].kcal_per_100g == 158.0
+    assert entries[0].kcal == 284.4
