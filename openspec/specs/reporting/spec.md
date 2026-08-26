@@ -28,6 +28,8 @@ For the **day** period only, the budget used for the difference SHALL be increas
 
 A day-period calorie report SHALL also include a short advice line for the rest of the day, informed by the (activity-credited) remaining calories for the day and a qualitative read of whether the food logged so far leans toward one macronutrient group, worded so as to nudge toward balance without stating a specific macronutrient gram amount the system does not track. This advice SHALL NOT be generated when there is no food logged that day.
 
+When a user asks for a report over a period in which nothing was logged, the system SHALL respond conversationally, addressing the user's query while stating that the diary is empty for that period. For daily empty reports, the conversational response SHALL acknowledge the user's full remaining calorie budget. It SHALL NOT produce charts or a dietician review.
+
 #### Scenario: Weekly calorie report
 
 - **WHEN** a user asks for a weekly calorie report
@@ -36,7 +38,7 @@ A day-period calorie report SHALL also include a short advice line for the rest 
 #### Scenario: Period with no data at all
 
 - **WHEN** a user asks for a report over a period in which nothing was logged
-- **THEN** the system says there is no data for that period and produces no chart or dietician review
+- **THEN** the system responds conversationally indicating that the diary is empty (e.g. acknowledging the full remaining budget for a daily query) and produces no chart or dietician review
 
 #### Scenario: Daily report on a day with logged activity
 
@@ -62,7 +64,6 @@ A day-period calorie report SHALL also include a short advice line for the rest 
 
 - **WHEN** a user asks for a daily calorie report on a day with no food logged
 - **THEN** no rest-of-day advice is generated
-
 ### Requirement: Weight report contents
 
 A weight report SHALL state the starting and ending weight of the period, the change over the period, the distance remaining to the goal, and a projected date of reaching the goal derived from the recent trend. The projection SHALL be omitted when the trend does not move towards the goal or when there are too few measurements to establish one.

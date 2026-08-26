@@ -1008,7 +1008,9 @@ class MessagePipeline:
                 activity_kcal_today=activity_kcal_today,
             )
             if not food_report.has_data:
-                messages.append(OutgoingMessage(text="Non ci sono dati sul cibo per questo periodo."))
+                from calobot.reporting.empty_reports import generate_empty_report_response
+                empty_msg = await generate_empty_report_response(self.gateway, period, budget_kcal)
+                messages.append(OutgoingMessage(text=empty_msg))
             else:
                 text = (
                     f"Calorie ({period}): totale {food_report.total_kcal:.0f} kcal, "
