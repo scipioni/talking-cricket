@@ -239,3 +239,153 @@ async def test_no_tool_schema_exposes_a_user_identifier(db_session, settings, ll
         schema_text = str(tool.args_schema.model_json_schema()).lower()
         assert "user_id" not in schema_text
         assert "telegram" not in schema_text
+
+
+# -- get_meal_suggestion_context: the situation is derived, not judged by the model --
+
+
+async def _suggestion_context(db_session, settings, llm, user):
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    return await tools["get_meal_suggestion_context"].handler(NoArgs())
+
+
+async def _eat_today(db_session, settings, user, kcal: float):
+    """Logs a single entry worth `kcal` today, so the day's remaining balance can be
+    steered to either side of zero."""
+    from calobot.persistence.timeutil import today_in_timezone
+
+    today = today_in_timezone(settings.timezone)
+    when = dt.datetime.combine(today, dt.time(12, 0), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "pasto di prova", 100, kcal, when))
+    await db_session.flush()
+
+
+async def test_meal_suggestion_context_within_budget_when_balance_is_positive(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Budget-appropriate meal and recipe suggestions."""
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    budget = await current_budget(db_session, user)
+    assert budget is not None
+    await _eat_today(db_session, settings, user, budget.target_kcal - 400)
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["mode"] == "within_budget"
+    assert result["remaining_today_kcal"] == 400
+    assert result["ceiling_kcal"] == 400
+
+
+async def test_meal_suggestion_context_over_budget_when_balance_is_negative(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Empathetic counseling for budget deficits."""
+    from calobot.advice.tools import OVER_BUDGET_CEILING_KCAL
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    budget = await current_budget(db_session, user)
+    assert budget is not None
+    await _eat_today(db_session, settings, user, budget.target_kcal + 150)
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["mode"] == "over_budget"
+    assert result["remaining_today_kcal"] == -150
+    assert result["ceiling_kcal"] == OVER_BUDGET_CEILING_KCAL
+
+
+async def test_meal_suggestion_context_treats_exactly_zero_as_over_budget(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Empathetic counseling for budget deficits, scenario
+    'Remaining balance is exactly zero': there is no balance left to suggest a meal
+    within, so the counseling behaviour applies."""
+    from calobot.advice.tools import OVER_BUDGET_CEILING_KCAL
+    from calobot.profile.service import current_budget
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    budget = await current_budget(db_session, user)
+    assert budget is not None
+    await _eat_today(db_session, settings, user, budget.target_kcal)
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["remaining_today_kcal"] == 0
+    assert result["mode"] == "over_budget"
+    assert result["ceiling_kcal"] == OVER_BUDGET_CEILING_KCAL
+
+
+async def test_meal_suggestion_context_reports_no_budget_for_an_incomplete_profile(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Budget-appropriate meal and recipe suggestions, scenario
+    'Profile incomplete so no budget exists': no remaining balance may be stated or
+    implied, so none is returned."""
+    from calobot.persistence.repository import create_user
+
+    await seed_all(db_session)
+    user = await create_user(db_session, telegram_user_id=77)
+    await db_session.flush()
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["mode"] == "no_budget"
+    assert result["remaining_today_kcal"] is None
+    assert result["ceiling_kcal"] is None
+
+
+async def test_meal_suggestion_context_carries_recent_food_in_one_call(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Budget-appropriate meal and recipe suggestions: retrieving
+    the balance and the recent entries must not depend on the model choosing to make
+    two separate retrievals."""
+    from calobot.persistence.timeutil import today_in_timezone
+
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    today = today_in_timezone(settings.timezone)
+    when = dt.datetime.combine(today, dt.time(12, 0), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "pollo alla griglia", 150, 165, when))
+    await db_session.flush()
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["remaining_today_kcal"] is not None
+    assert result["recent_food"]["no_data"] is False
+    descriptions = [e["description"] for e in result["recent_food"]["entries"]]
+    assert "pollo alla griglia" in descriptions
+
+
+async def test_meal_suggestion_context_reports_absent_recent_food_as_absent(
+    db_session, settings, llm
+):
+    """specs/advice-agent - Absent data is reported as absent, not estimated: with no
+    recent entries the variety signal says so rather than being omitted."""
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    result = await _suggestion_context(db_session, settings, llm, user)
+
+    assert result["recent_food"]["no_data"] is True
+    assert result["mode"] == "within_budget"
+
+
+async def test_suggestion_and_budget_tools_are_both_offered(db_session, settings, llm):
+    """The prescriptive and the non-prescriptive budget question stay on separate
+    tools (design.md - Decision 1)."""
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tools = await build_tool_registry(db_session, llm.gateway, user, settings.timezone)
+    names = [tool.name for tool in tools]
+
+    assert "get_meal_suggestion_context" in names
+    assert "get_profile_and_budget" in names
+    assert "get_recent_food_descriptions" in names

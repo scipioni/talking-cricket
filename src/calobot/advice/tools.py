@@ -33,6 +33,21 @@ from calobot.reporting.periods import Period
 # crowding the context).
 MAX_LISTED_ENTRIES = 50
 
+# The situations a meal suggestion can be made in. Derived from the day's figures by
+# `_meal_suggestion_context_handler`, never by the model comparing numbers itself
+# (specs/advice-agent - The suggestion situation is determined outside the language
+# model).
+SuggestionMode = Literal["within_budget", "over_budget", "no_budget"]
+
+# What a suggestion must stay under once the day's balance is spent. A constant rather
+# than a line of prompt prose, so the narration guard can enforce it (design.md -
+# Decision 4) and the nutrition judgement it encodes is reviewable in one place.
+OVER_BUDGET_CEILING_KCAL = 100
+
+# The window `get_meal_suggestion_context` reads for the qualitative variety signal,
+# matching `RecentDaysQuery`'s default so both tools describe the same recent past.
+SUGGESTION_RECENT_DAYS = 2
+
 
 class PeriodQuery(BaseModel):
     period: Literal["day", "week", "month", "year"]
@@ -171,6 +186,34 @@ def _list_entries_handler(session: AsyncSession, user: User, tz: ZoneInfo):
     return handler
 
 
+async def _recent_food_payload(
+    session: AsyncSession, user: User, tz: ZoneInfo, days: int
+) -> dict[str, Any]:
+    """The recent-meals view shared by `get_recent_food_descriptions` and
+    `get_meal_suggestion_context`, so a suggestion reasons over exactly the entries a
+    direct lookup would return."""
+    today = today_in_timezone(tz)
+    start, _ = day_bounds_utc(today - dt.timedelta(days=days), tz)
+    _, end = day_bounds_utc(today, tz)
+    entries = await get_entries_in_range(session, "food", user.id, start, end)
+    if not entries:
+        return {"no_data": True, "days": days}
+    capped = entries[:MAX_LISTED_ENTRIES]
+    return {
+        "no_data": False,
+        "truncated": len(entries) > MAX_LISTED_ENTRIES,
+        "days": days,
+        "entries": [
+            {
+                "description": e.description,
+                "kcal": round(e.kcal),
+                "day": e.consumed_at.astimezone(tz).date().isoformat(),
+            }
+            for e in capped
+        ],
+    }
+
+
 def _recent_food_descriptions_handler(session: AsyncSession, user: User, tz: ZoneInfo):
     """Backs `get_recent_food_descriptions`: a relative-days window resolved
     server-side (like the period tools' `reference_day`), so the model never has to
@@ -178,28 +221,27 @@ def _recent_food_descriptions_handler(session: AsyncSession, user: User, tz: Zon
     Decisions)."""
 
     async def handler(args: RecentDaysQuery) -> dict[str, Any]:
-        today = today_in_timezone(tz)
-        start, _ = day_bounds_utc(today - dt.timedelta(days=args.days), tz)
-        _, end = day_bounds_utc(today, tz)
-        entries = await get_entries_in_range(session, "food", user.id, start, end)
-        if not entries:
-            return {"no_data": True, "days": args.days}
-        capped = entries[:MAX_LISTED_ENTRIES]
-        return {
-            "no_data": False,
-            "truncated": len(entries) > MAX_LISTED_ENTRIES,
-            "days": args.days,
-            "entries": [
-                {
-                    "description": e.description,
-                    "kcal": round(e.kcal),
-                    "day": e.consumed_at.astimezone(tz).date().isoformat(),
-                }
-                for e in capped
-            ],
-        }
+        return await _recent_food_payload(session, user, tz, args.days)
 
     return handler
+
+
+async def _today_balance(
+    session: AsyncSession, user: User, tz: ZoneInfo, budget: BudgetResult
+) -> tuple[float, int]:
+    """Today's eaten total and remaining balance, off the same reporting path a day
+    report uses. Shared by `get_profile_and_budget` and `get_meal_suggestion_context`
+    so the figure a suggestion is derived from cannot drift from the figure a direct
+    budget question reports."""
+    today = today_in_timezone(tz)
+    activity_today = await build_activity_report(session, user.id, "day", today, tz)
+    activity_kcal_today = activity_today.total_kcal if activity_today.has_data else 0.0
+    food_today = await build_food_report(
+        session, user.id, "day", today, tz, budget.target_kcal, activity_kcal_today=activity_kcal_today
+    )
+    eaten_today = food_today.total_kcal if food_today.has_data else 0.0
+    remaining = round(budget.target_kcal + food_today.activity_credit_kcal - eaten_today)
+    return eaten_today, remaining
 
 
 def _profile_and_budget_handler(
@@ -208,19 +250,50 @@ def _profile_and_budget_handler(
     async def handler(_args: NoArgs) -> dict[str, Any]:
         if budget is None:
             return {"no_data": True, "reason": "profilo non ancora completo: budget non calcolabile"}
-        today = today_in_timezone(tz)
-        activity_today = await build_activity_report(session, user.id, "day", today, tz)
-        activity_kcal_today = activity_today.total_kcal if activity_today.has_data else 0.0
-        food_today = await build_food_report(
-            session, user.id, "day", today, tz, budget.target_kcal, activity_kcal_today=activity_kcal_today
-        )
-        eaten_today = food_today.total_kcal if food_today.has_data else 0.0
+        eaten_today, remaining = await _today_balance(session, user, tz, budget)
         return {
             "no_data": False,
             "daily_budget_kcal": round(budget.target_kcal),
             "goal_kg": user.peso_obiettivo_kg,
             "eaten_today_kcal": round(eaten_today),
-            "remaining_today_kcal": round(budget.target_kcal + food_today.activity_credit_kcal - eaten_today),
+            "remaining_today_kcal": remaining,
+        }
+
+    return handler
+
+
+def _meal_suggestion_context_handler(
+    session: AsyncSession, user: User, tz: ZoneInfo, budget: BudgetResult | None
+):
+    """Backs `get_meal_suggestion_context`. The model's only judgement is that the
+    user is asking what to eat - expressed by calling this tool at all. Everything
+    that follows from the day's figures, including which situation applies and what
+    ceiling it imposes, is derived here (specs/advice-agent - The suggestion situation
+    is determined outside the language model)."""
+
+    async def handler(_args: NoArgs) -> dict[str, Any]:
+        recent_food = await _recent_food_payload(session, user, tz, SUGGESTION_RECENT_DAYS)
+        if budget is None:
+            return {
+                "mode": "no_budget",
+                "ceiling_kcal": None,
+                "remaining_today_kcal": None,
+                "reason": "profilo non ancora completo: budget non calcolabile",
+                "recent_food": recent_food,
+            }
+        _, remaining = await _today_balance(session, user, tz, budget)
+        mode: SuggestionMode
+        ceiling: int
+        if remaining > 0:
+            mode, ceiling = "within_budget", remaining
+        else:
+            # Zero counts as spent: there is no balance left to suggest a meal within.
+            mode, ceiling = "over_budget", OVER_BUDGET_CEILING_KCAL
+        return {
+            "mode": mode,
+            "ceiling_kcal": ceiling,
+            "remaining_today_kcal": remaining,
+            "recent_food": recent_food,
         }
 
     return handler
@@ -284,9 +357,22 @@ async def build_tool_registry(
             name="get_profile_and_budget",
             description=(
                 "Budget calorico giornaliero dell'utente, obiettivo di peso e quante "
-                "calorie restano oggi."
+                "calorie restano oggi. Usalo quando l'utente CHIEDE questi numeri (es. "
+                "\"quante calorie mi restano?\"), non quando chiede cosa mangiare."
             ),
             args_schema=NoArgs,
             handler=_profile_and_budget_handler(session, user, tz, budget),
+        ),
+        ToolDefinition(
+            name="get_meal_suggestion_context",
+            description=(
+                "Usalo quando l'utente chiede cosa mangiare o una ricetta (es. \"cosa "
+                "posso mangiare stasera?\", \"cosa mi consigli per cena?\"). Restituisce "
+                "gia' pronti la situazione del suo budget di oggi, il limite di calorie "
+                "entro cui restare e i pasti recenti: non devi calcolare o confrontare "
+                "nulla tu."
+            ),
+            args_schema=NoArgs,
+            handler=_meal_suggestion_context_handler(session, user, tz, budget),
         ),
     ]

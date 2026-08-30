@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from calobot.advice.tools import build_tool_registry
+from calobot.advice.tools import SuggestionMode, build_tool_registry
 from calobot.llm.content import MessageContent, TextContent
 from calobot.llm.errors import LLMError
 from calobot.llm.gateway import LLMGateway, ToolCallResult
@@ -41,9 +42,8 @@ Hai a disposizione strumenti di sola lettura per recuperare i suoi dati reali. R
   totale, una media o una differenza a mente: gli strumenti la restituiscono gia'
   calcolata, e devi riportare esattamente quel numero.
 - Se l'utente chiede un consiglio su cosa mangiare o una ricetta (es. "cosa mi
-  consigli di mangiare stasera?"), usa SEMPRE sia `get_profile_and_budget` sia
-  `get_recent_food_descriptions`, cosi' da conoscere sia le calorie rimanenti sia
-  cosa ha gia' mangiato di recente.
+  consigli di mangiare stasera?"), usa `get_meal_suggestion_context`: ti restituisce
+  gia' pronto tutto cio' che serve per rispondere.
 - Per la categoria 2, NON chiamare nessuno strumento: non serve alcun dato personale
   per rispondere, la risposta verra' data dalle tue conoscenze generali.
 - Il bot NON traccia macronutrienti, sodio, zuccheri o altri valori nutrizionali oltre
@@ -54,7 +54,7 @@ Hai a disposizione strumenti di sola lettura per recuperare i suoi dati reali. R
 """
 
 
-def _narrate_system_prompt(bot_label: str) -> str:
+def _narrate_base_prompt(bot_label: str) -> str:
     return f"""\
 Sei {bot_label}, un bot italiano di tracciamento nutrizionale (non un consulente
 medico). Ti sono stati forniti i risultati di alcuni strumenti che hanno interrogato
@@ -94,21 +94,76 @@ Regole valide in entrambi i casi:
   solo leggere e spiegare, non scrivere nulla nel diario.
 - Se nella domanda originale dell'utente ci sono pronomi o riferimenti ambigui (es. 'che proprietà hanno'), usa la cronologia dei messaggi inclusa per comprendere a cosa si riferisce la domanda e rispondi specificando chiaramente di cosa stai parlando (es. spiegando le proprietà dei 'crauti fermentati' se la cronologia recente mostra che si parlava di quello).
 
-RICETTE E SUGGERIMENTI DI PASTI:
-- Se l'utente chiede idee su cosa mangiare o ricette (es. "cosa posso mangiare stasera?"), controlla se è stato usato lo strumento `get_profile_and_budget` per verificare le calorie rimanenti oggi (`remaining_today_kcal`):
-  1. Se le calorie rimanenti sono POSITIVE (es. 400 kcal): suggerisci 1-2 ricette o idee di pasti sani e realistici che stiano perfettamente entro quel budget calorico residuo. Riporta esplicitamente il valore delle calorie rimanenti nella risposta per motivare le tue proposte.
-  2. Se le calorie rimanenti sono ZERO o NEGATIVE (l'utente ha esaurito o superato il suo budget, es. -150 kcal): NON consigliare di saltare i pasti, digiunare o compensare eccessivamente. Fornisci invece un supporto empatico, rassicura l'utente che è normale sforare ogni tanto, e proponi opzioni di spuntini/pasti a bassissima densità calorica (< 100 kcal/100g, come finocchi, cetrioli o brodi caldi leggeri, restando sotto le 100 kcal totali) che danno sazietà e volume senza appesantire la giornata.
-- Se è stato usato anche `get_recent_food_descriptions`, guarda le descrizioni dei
-  pasti recenti in modo qualitativo (esattamente come faresti per la densità
-  calorica) per capire se sembra mancare una fonte proteica, o se i pasti recenti
-  sono stati prevalentemente ad alta densità calorica, e orienta la tua proposta
-  di conseguenza (es. verso un secondo con proteine se ne è mancata una). Se
-  "no_data" è true o non ci sono abbastanza informazioni, non inventare un
-  pattern: suggerisci comunque la ricetta in base solo alle calorie rimanenti.
-  Il bot NON traccia i macronutrienti (carboidrati, grassi, proteine): non
-  indicare MAI una quantità in grammi di un macronutriente, ragiona solo in
-  termini qualitativi sulle descrizioni dei cibi.
 """
+
+
+# One fragment per derived situation, appended to the base prompt by
+# `_narrate_system_prompt`. Keeping them separate is what lets a test assert which
+# situation the answer was composed for without invoking a model (design.md -
+# Decision 2); the branch itself is decided in `calobot.advice.tools`, never here.
+
+_SUGGESTION_COMMON = """\
+- Guarda "recent_food" in modo qualitativo (come faresti per la densita' calorica) per
+  capire se sembra mancare una fonte proteica o se i pasti recenti sono stati
+  prevalentemente ad alta densita', e orienta la proposta di conseguenza. Se
+  "no_data" e' true non inventare un pattern: non affermare nulla sulla varieta'
+  recente.
+- Il bot NON traccia i macronutrienti (carboidrati, grassi, proteine): non indicare MAI
+  una quantita' in grammi di un macronutriente, ragiona solo qualitativamente sulle
+  descrizioni dei cibi.
+- Le calorie che attribuisci a un piatto che proponi sono una STIMA, non un dato del
+  diario: presentale come approssimative (es. "circa 300 kcal") e non sommarle ne'
+  sottrarle ai totali o al budget dell'utente.
+- In `suggestion_mode` riporta esattamente il valore di "mode" che trovi nei risultati,
+  e in `suggested_kcal_total` la tua stima in kcal del piatto che proponi.
+"""
+
+SUGGESTION_FRAGMENT_WITHIN_BUDGET = f"""
+
+SUGGERIMENTO DI UN PASTO - all'utente restano calorie oggi:
+- Il risultato di `get_meal_suggestion_context` contiene "remaining_today_kcal": quelle
+  sono le calorie che gli restano oggi, gia' calcolate. Riportale esplicitamente nella
+  risposta per motivare la proposta, senza ricalcolarle.
+- Proponi 1-2 ricette o idee di pasti sani, realistici e italiani le cui calorie stimate
+  stiano entro "ceiling_kcal".
+{_SUGGESTION_COMMON}"""
+
+SUGGESTION_FRAGMENT_OVER_BUDGET = f"""
+
+SUGGERIMENTO DI UN PASTO - l'utente ha gia' esaurito o superato il budget di oggi:
+- NON consigliare di saltare il pasto, di digiunare o di compensare. Rassicuralo: sforare
+  ogni tanto e' normale.
+- Rispondi in modo empatico e di supporto, poi proponi un'opzione a bassissima densita'
+  calorica (meno di 100 kcal per 100 g: brodi caldi leggeri, finocchi, cetrioli, sedano)
+  che dia sazieta' e volume.
+- La proposta deve restare entro "ceiling_kcal" kcal totali: non proporre nulla di piu'
+  sostanzioso, per quanto leggero ti sembri.
+{_SUGGESTION_COMMON}"""
+
+SUGGESTION_FRAGMENT_NO_BUDGET = f"""
+
+SUGGERIMENTO DI UN PASTO - il profilo non e' completo, quindi non esiste un budget:
+- NON indicare ne' lasciare intendere un numero di calorie rimanenti: per questo utente
+  non e' calcolabile, e inventarlo non e' ammesso.
+- Proponi comunque 1-2 idee di pasti sani, realistici e italiani, e invitalo a completare
+  il profilo se vuole proposte tarate sul suo budget.
+{_SUGGESTION_COMMON}"""
+
+_SUGGESTION_FRAGMENTS: dict[SuggestionMode, str] = {
+    "within_budget": SUGGESTION_FRAGMENT_WITHIN_BUDGET,
+    "over_budget": SUGGESTION_FRAGMENT_OVER_BUDGET,
+    "no_budget": SUGGESTION_FRAGMENT_NO_BUDGET,
+}
+
+
+def _narrate_system_prompt(bot_label: str, mode: SuggestionMode | None) -> str:
+    """The base prompt plus exactly one situation fragment. `mode is None` - no
+    suggestion was asked for - appends nothing, which is the non-prescriptive path
+    unchanged."""
+    base = _narrate_base_prompt(bot_label)
+    if mode is None:
+        return base
+    return base + _SUGGESTION_FRAGMENTS[mode]
 
 
 class AdviceAnswer(BaseModel):
@@ -124,6 +179,17 @@ class AdviceAnswer(BaseModel):
         "una domanda generica o pratica risposta con conoscenze generali - in quel "
         "caso una risposta senza dati non e' un rifiuto.",
     )
+    suggestion_mode: Literal["none", "within_budget", "over_budget", "no_budget"] = Field(
+        default="none",
+        description="Se hai proposto un pasto, riporta esattamente il valore di 'mode' "
+        "che hai trovato nei risultati degli strumenti. Resta 'none' per qualsiasi "
+        "risposta che non proponga un pasto.",
+    )
+    suggested_kcal_total: int | None = Field(
+        default=None,
+        description="La tua stima in kcal del piatto che hai proposto, se ne hai "
+        "proposto uno. Null altrimenti.",
+    )
 
 
 COULD_NOT_ANSWER_TEXT = (
@@ -135,6 +201,33 @@ UNFOUNDED_CLAIM_REPLACEMENT = (
     "Non ho toccato il tuo diario: posso solo leggere i tuoi dati e spiegarteli. Puoi "
     "riformulare la domanda?"
 )
+
+# Substituted when a composed suggestion does not match the situation that was derived
+# (specs/advice-agent - An answer inconsistent with the determined situation is not
+# delivered). These read as answers, not as diagnostics: the user asked something
+# reasonable, and a confused meta-reply would serve them worse than a plain suggestion.
+SUGGESTION_FALLBACK_TEXT: dict[SuggestionMode, str] = {
+    "within_budget": (
+        "Oggi ti restano ancora {remaining} kcal. Ti propongo qualcosa di semplice: "
+        "del pesce bianco al forno con verdure di stagione, oppure un'insalata di ceci "
+        "con pomodorini e un filo d'olio."
+    ),
+    "over_budget": (
+        "Per oggi il budget e' finito, ma non e' il caso di saltare il pasto: capita a "
+        "tutti di sforare, e domani si riparte. Se hai fame, vai su qualcosa di molto "
+        "leggero come un brodo vegetale caldo, dei finocchi crudi o del sedano."
+    ),
+    "no_budget": (
+        "Per proporti qualcosa di calibrato mi manca ancora qualche dato del tuo "
+        "profilo. Intanto un'idea semplice: del pollo alla piastra con verdure grigliate, "
+        "oppure una zuppa di legumi. Se completi il profilo posso tararti le proposte "
+        "sulle calorie che ti restano."
+    ),
+}
+
+
+def _suggestion_fallback(mode: SuggestionMode, remaining: int | None) -> str:
+    return SUGGESTION_FALLBACK_TEXT[mode].format(remaining=remaining)
 
 
 def _get_recent_history_context(chat_id: int | None) -> str:
@@ -158,6 +251,45 @@ def _get_recent_history_context(chat_id: int | None) -> str:
         return ""
 
     return "\n".join(recent_lines)
+
+
+class _DerivedSuggestion(NamedTuple):
+    mode: SuggestionMode
+    ceiling_kcal: int | None
+    remaining_kcal: int | None
+
+
+def _derived_suggestion(tool_results: list[ToolCallResult]) -> _DerivedSuggestion | None:
+    """The situation `get_meal_suggestion_context` derived, or None when the user was
+    not asking what to eat. Read back off the tool result rather than recomputed, so
+    exactly one computation decides which situation applies (specs/advice-agent - The
+    suggestion situation is determined outside the language model)."""
+    for call in reversed(tool_results):
+        if call.tool != "get_meal_suggestion_context":
+            continue
+        mode = call.result.get("mode")
+        if mode not in ("within_budget", "over_budget", "no_budget"):
+            continue
+        ceiling = call.result.get("ceiling_kcal")
+        remaining = call.result.get("remaining_today_kcal")
+        return _DerivedSuggestion(
+            mode=mode,
+            ceiling_kcal=ceiling if isinstance(ceiling, int) else None,
+            remaining_kcal=remaining if isinstance(remaining, int) else None,
+        )
+    return None
+
+
+def _suggestion_is_inconsistent(result: AdviceAnswer, derived: _DerivedSuggestion) -> bool:
+    """Whether a composed answer contradicts the situation that was derived. Checks
+    what the model declared about its own answer - see design.md - Decision 4 for why
+    that trust boundary is accepted."""
+    if result.suggestion_mode != derived.mode:
+        return True
+    if derived.mode == "over_budget" and derived.ceiling_kcal is not None:
+        declared = result.suggested_kcal_total
+        return declared is not None and declared > derived.ceiling_kcal
+    return False
 
 
 def _narration_prompt(raw_text: str, tool_results: list[ToolCallResult], history_context: str = "") -> str:
@@ -215,10 +347,11 @@ async def answer(
         if gather.exhausted:
             return COULD_NOT_ANSWER_TEXT
 
+        derived = _derived_suggestion(gather.tool_results)
         narration = TextContent(text=_narration_prompt(raw_text, gather.tool_results, history_context))
         result = await gateway.call_structured(
             step="advice_narrate",
-            system_prompt=_narrate_system_prompt(bot_label),
+            system_prompt=_narrate_system_prompt(bot_label, derived.mode if derived else None),
             content=narration,
             schema=AdviceAnswer,
             extra_telemetry={
@@ -235,4 +368,14 @@ async def answer(
     if asserts_a_record(reply):
         logger.warning("suppressed an advice reply claiming a record was made: %r", reply)
         return UNFOUNDED_CLAIM_REPLACEMENT
+    if derived is not None and _suggestion_is_inconsistent(result, derived):
+        logger.warning(
+            "suppressed a suggestion inconsistent with the derived situation "
+            "(derived=%s ceiling=%s, declared=%s kcal=%s)",
+            derived.mode,
+            derived.ceiling_kcal,
+            result.suggestion_mode,
+            result.suggested_kcal_total,
+        )
+        return _suggestion_fallback(derived.mode, derived.remaining_kcal)
     return reply
