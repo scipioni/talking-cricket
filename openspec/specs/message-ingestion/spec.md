@@ -52,6 +52,11 @@ When a user specifies a vague loggable item (such as a generic food name without
 - **WHEN** a user writes a question about their own logged food, weight or activity that is not a request for a standard report, such as "posso permettermi una pizza stasera?"
 - **THEN** the message is classified as other and answered by the advice-agent capability using the user's stored data, and no entry is created
 
+#### Scenario: Analytical weight-loss advice question
+
+- **WHEN** a user writes an analytical weight-loss or progress-tracking question asking for calculations or estimates (e.g., "quanti kg avrei dovuto perdere?", "perché non perdo peso?")
+- **THEN** the message is classified as other and answered by the advice-agent capability using the user's stored data, rather than being classified as report (which would search for logged weight measurements and report no data is present)
+
 #### Scenario: Message mixing two loggable intents
 
 - **WHEN** a user writes a message containing more than one actionable, loggable intent, such as "ho mangiato una mela e peso 77kg"

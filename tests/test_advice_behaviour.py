@@ -206,6 +206,38 @@ async def test_empty_period_says_no_data(db_session, run, monkeypatch):
     run.assert_clean()
 
 
+# -- 7.6.1 analytical weight-loss advice routing ----------------------------------
+
+
+async def test_analytical_weight_loss_advice_routing(db_session, run, monkeypatch):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm = _install(run, monkeypatch)
+    llm.push({"intent": "other", "ignored_text": None})
+    llm.push_agent_turn(
+        [
+            [
+                ToolCall(name="get_calorie_summary", arguments={"period": "week"}),
+                ToolCall(name="get_profile_and_budget", arguments={}),
+            ]
+        ],
+        final={
+            "answer_text": "In base al tuo deficit di questa settimana, avresti dovuto perdere circa 0.5 kg.",
+            "used_data": True,
+            "declined_reason": None,
+        },
+    )
+
+    sent = await run.say("quanti kg avrei dovuto perdere questa settimana?")
+
+    assert "0.5 kg" in sent[-1].text
+    tool_names = [call["function"]["name"] for call in llm.calls[1]["tools"]]
+    assert "get_calorie_summary" in tool_names
+    assert "get_profile_and_budget" in tool_names
+    run.assert_clean()
+
+
 # -- 7.7 too little data for a pattern declines rather than asserting one ---------
 
 

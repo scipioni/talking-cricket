@@ -24,12 +24,11 @@ Classifica il messaggio dell'utente in ESATTAMENTE uno di questi intent:
   Il peso obiettivo NON è una misurazione: "peso obiettivo 74kg" è profile, mentre "peso 74kg" (senza "obiettivo") è sempre weight.
 - correction: l'utente sta correggendo una voce già registrata.
   ESEMPI: "no erano 20g", "non era pasta ma riso".
-- report: l'utente chiede un riepilogo/statistiche.
-  ESEMPI: "report settimanale", "quante calorie ho mangiato oggi?".
-- other: qualsiasi altra cosa puramente conversazionale, domande generiche o richieste di consiglio che NON includono un alimento, un peso o un'attività.
+- report: l'utente chiede un report, un riepilogo o statistiche standard dei propri log (es. "report settimanale", "riepilogo di oggi", "statistiche peso").
+- other: qualsiasi altra cosa puramente conversazionale, domande generiche, richieste di consiglio, o domande aperte/analitiche sul proprio andamento che NON includono un alimento, un peso o un'attività da registrare (es. domande sul funzionamento del bot, richieste di parere o stime teoriche sul peso perso basati sul deficit, come "quanti kg avrei dovuto perdere?", "perché non dimagrisco?", "sto andando bene?").
 
 GESTIONE MULTI-INTENT E CONTRADDIZIONI:
-- Se il messaggio contiene CONVERSAZIONE e un intent (es. "ho mangiato una mela, ecco i log", "ciao, 100g di pollo"), estrai l'intent ("food") e IGNORA COMPLETAMENTE la conversazione (imposta ignored_text a null).
+- Se il messaggio contiene CONVERSAZIONE e un intent (es. "ho mangiato una mela, ecco i log", "ciao, 100g di pollo"), estrai l'intent ("food") e TRASCURA COMPLETAMENTE la conversazione (imposta ignored_text a null).
 - Se il messaggio contiene PIÙ INTENT REGISTRABILI DIVERSI E INDIPENDENTI (es. "ho mangiato una mela e poi ho corso 30 minuti"), scegli l'intent DOMINANTE (food) e riporta in `ignored_text` SOLO il testo della parte REGISTRABILE che non stai classificando (es. "e poi ho corso 30 minuti").
 - Se il messaggio contiene una CONTRADDIZIONE INTERNA o un cambio di idea sulla STESSA COSA (es. "stavo per registrare la pizza ma ho mangiato un'insalata"), NON usare `ignored_text`. Classifica l'intent FINALE ("food" per l'insalata) e imposta `ignored_text` a null.
 
