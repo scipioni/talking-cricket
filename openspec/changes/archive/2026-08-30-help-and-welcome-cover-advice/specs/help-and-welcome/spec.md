@@ -1,0 +1,76 @@
+## Purpose
+
+Governs the two messages in which the bot describes itself — the welcome a user meets on
+first contact and the `/help` reference they can ask for at any time — so that what the
+bot says it can do stays in step with what it can actually do.
+
+## ADDED Requirements
+
+### Requirement: The welcome message orients a first-time user
+
+On first contact the system SHALL send a message that names the bot, states that it
+tracks food, weight and physical activity, and shows concrete examples of writing to it
+in free-form language. The message SHALL state that the bot is experimental software and
+does not replace medical advice, and SHALL direct the user to a professional for health
+goals. It SHALL end by leading into profile setup, since a calorie budget cannot be
+computed without it.
+
+#### Scenario: A new user makes first contact
+
+- **WHEN** a user starts the bot for the first time
+- **THEN** they receive a message naming the bot, describing what it tracks, showing
+  examples of how to write to it, and leading into profile setup
+
+#### Scenario: The disclaimer is present
+
+- **WHEN** the welcome message is composed
+- **THEN** it states that the software is experimental and is not a substitute for
+  medical advice
+
+### Requirement: Every conversational capability is discoverable from the help text
+
+The help text SHALL let a user discover each thing they can do by writing to the bot in
+free-form language, with at least one concrete example of each: logging food, logging
+physical activity, logging weight, requesting a report, asking a question about their own
+logged data, asking for a meal or recipe suggestion, sending a photo, and correcting a
+profile field. It SHALL also list the commands the bot responds to.
+
+#### Scenario: A user asks what the bot can do
+
+- **WHEN** a user requests the help text
+- **THEN** it presents both the available commands and a concrete written example for
+  each conversational capability, including asking questions about their own data and
+  asking for a meal suggestion
+
+#### Scenario: A capability ships without being described
+
+- **WHEN** a capability a user can reach by writing to the bot is added or changed
+- **THEN** the help text is updated in the same change, so no reachable capability is
+  left undiscoverable
+
+### Requirement: The help text states what the bot does not track
+
+The help text SHALL name at least the quantities a user is most likely to assume are
+tracked and are not — in particular macronutrients — so that the limit is learned from
+the documentation rather than from being refused mid-conversation.
+
+#### Scenario: A user wonders whether macronutrients are tracked
+
+- **WHEN** a user reads the help text
+- **THEN** it states that the bot tracks calories and does not track macronutrients
+
+### Requirement: Self-description makes no claim the bot cannot honour
+
+Neither message SHALL describe a capability that is not implemented, and neither SHALL
+promise medical, clinical or diagnostic guidance. An example shown to the user SHALL be
+one the bot would actually handle as described.
+
+#### Scenario: An example is shown for an unimplemented capability
+
+- **WHEN** either message would show an example of something the bot cannot do
+- **THEN** that example is not presented to the user
+
+#### Scenario: No clinical promise is made
+
+- **WHEN** either message describes what the bot is for
+- **THEN** it does not offer medical, clinical or diagnostic guidance
