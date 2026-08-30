@@ -253,7 +253,10 @@ async def test_report_daily_rolling_average_and_weight_formatting(db_session, cl
 
     sent = await client.say("report di oggi")
 
-    assert len(sent) == 3
+    # Calories and weight only: no activity was logged, and an unscoped report does not
+    # announce the absence (specs/reporting - An unscoped report reports only the topics
+    # that have data).
+    assert len(sent) == 2
 
     # Food report assertions
     food_msg = next(msg for msg in sent if "Calorie" in msg.text)

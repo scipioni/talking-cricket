@@ -1062,7 +1062,14 @@ class MessagePipeline:
                 self.session, self.user.id, period, reference_day, self.tz, goal_kg
             )
             if not weight_report.has_data:
-                messages.append(OutgoingMessage(text="Non ci sono dati sul peso per questo periodo."))
+                # Only answer the absence when the user asked about weight. On an
+                # unscoped report they asked for a report, not about weight, and saying
+                # so is noise (specs/reporting - An unscoped report reports only the
+                # topics that have data).
+                if extraction.topic == "weight":
+                    messages.append(
+                        OutgoingMessage(text="Non ci sono dati sul peso per questo periodo.")
+                    )
             else:
                 if weight_report.start_kg == weight_report.end_kg:
                     text = f"Peso ({period}): {weight_report.end_kg:.1f} kg"
@@ -1090,7 +1097,11 @@ class MessagePipeline:
                 self.session, self.user.id, period, reference_day, self.tz
             )
             if not activity_report.has_data:
-                messages.append(OutgoingMessage(text="Non ci sono dati sull'attività per questo periodo."))
+                # As above: reported only when the user scoped the request to activity.
+                if extraction.topic == "activity":
+                    messages.append(
+                        OutgoingMessage(text="Non ci sono dati sull'attività per questo periodo.")
+                    )
             else:
                 messages.append(
                     OutgoingMessage(
