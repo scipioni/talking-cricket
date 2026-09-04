@@ -20,6 +20,10 @@ class FoodCandidate:
     id: int
     source_name_en: str
     kcal_per_100g: float
+    protein_per_100g: float | None
+    fat_per_100g: float | None
+    carbs_per_100g: float | None
+    fiber_per_100g: float | None
     matched_alias: str
 
 
@@ -63,6 +67,10 @@ async def retrieve_food_candidates(session: AsyncSession, query: str) -> list[Fo
                 id=row.id,
                 source_name_en=row.source_name_en,
                 kcal_per_100g=row.kcal_per_100g,
+                protein_per_100g=row.protein_per_100g,
+                fat_per_100g=row.fat_per_100g,
+                carbs_per_100g=row.carbs_per_100g,
+                fiber_per_100g=row.fiber_per_100g,
                 matched_alias=matched_alias,
             )
         )

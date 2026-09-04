@@ -55,10 +55,12 @@ from calobot.profile.service import (
 from calobot.reporting.aggregation import (
     build_activity_report,
     build_daily_kcal_breakdown,
+    build_daily_macro_breakdown,
     build_food_report,
+    build_macro_report,
     build_weight_report,
 )
-from calobot.reporting.charts import render_calorie_chart, render_weight_chart
+from calobot.reporting.charts import render_calorie_chart, render_macro_chart, render_weight_chart
 from calobot.reporting.dietician import build_daily_advice, build_dietitian_review, format_dietician_review
 from calobot.reporting.periods import parse_period
 from calobot.settings import Settings
@@ -883,6 +885,16 @@ class MessagePipeline:
                 # re-derived against the corrected description's density.
                 entry.grams = entry.kcal / energy.kcal_per_100g * 100.0
             entry.provenance = energy.provenance
+
+            def scale_macro(per_100g: float | None) -> float | None:
+                if per_100g is None or entry.grams is None:
+                    return None
+                return per_100g * entry.grams / 100.0
+
+            entry.protein_g = scale_macro(energy.protein_per_100g)
+            entry.fat_g = scale_macro(energy.fat_per_100g)
+            entry.carbs_g = scale_macro(energy.carbs_per_100g)
+            entry.fiber_g = scale_macro(energy.fiber_per_100g)
             await self.session.flush()
             grams_text = f"{entry.grams:.0f}g" if entry.grams is not None else "grammi non stimabili"
             return [
@@ -1054,6 +1066,33 @@ class MessagePipeline:
                     if advice:
                         text += f"\n\n💡 {advice}"
 
+                messages.append(OutgoingMessage(text=text, photo_png=photo))
+
+        if extraction.topic == "macros":
+            macro_report = await build_macro_report(
+                self.session, self.user.id, period, reference_day, self.tz
+            )
+            if not macro_report.has_data:
+                messages.append(
+                    OutgoingMessage(text="Non ci sono dati sui macronutrienti per questo periodo.")
+                )
+            else:
+                text = (
+                    f"Macronutrienti ({period}): "
+                    f"proteine {macro_report.protein_total_g:.0f}g (media {macro_report.protein_avg_g:.0f}g/giorno), "
+                    f"grassi {macro_report.fat_total_g:.0f}g (media {macro_report.fat_avg_g:.0f}g/giorno), "
+                    f"carboidrati {macro_report.carbs_total_g:.0f}g (media {macro_report.carbs_avg_g:.0f}g/giorno), "
+                    f"fibre {macro_report.fiber_total_g:.0f}g (media {macro_report.fiber_avg_g:.0f}g/giorno)"
+                )
+                if macro_report.days_with_no_data:
+                    days_text = ", ".join(d.isoformat() for d in macro_report.days_with_no_data)
+                    text += f"\nGiorni senza dati: {days_text}"
+                photo = None
+                if period != "day":
+                    daily_macros = await build_daily_macro_breakdown(
+                        self.session, self.user.id, period, reference_day, self.tz
+                    )
+                    photo = render_macro_chart(daily_macros)
                 messages.append(OutgoingMessage(text=text, photo_png=photo))
 
         if extraction.topic in ("weight", "all"):

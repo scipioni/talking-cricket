@@ -24,6 +24,41 @@ async def test_retrieve_food_candidates_finds_noci(db_session):
     assert any("walnuts" in name.lower() for name in names)
 
 
+async def test_seed_backfills_macros_onto_a_row_seeded_before_macros_existed(db_session):
+    from calobot.persistence.models import FoodDataRow
+
+    # Simulates a row seeded before add-macro-nutrient-tracking: present by name,
+    # macro columns still null, as seed_food_data used to leave it forever since it
+    # only inserted missing rows.
+    db_session.add(
+        FoodDataRow(
+            source_name_en="Nuts, walnuts, english",
+            kcal_per_100g=654.0,
+            aliases_it="noci;noce;gherigli di noce",
+        )
+    )
+    await db_session.flush()
+
+    await seed_all(db_session)
+
+    result = await db_session.execute(
+        FoodDataRow.__table__.select().where(FoodDataRow.source_name_en == "Nuts, walnuts, english")
+    )
+    row = result.one()
+    assert row.protein_per_100g is not None
+    assert row.fat_per_100g is not None
+
+
+async def test_retrieve_food_candidates_carries_macros(db_session):
+    await seed_all(db_session)
+    candidates = await retrieve_food_candidates(db_session, "noci")
+    walnuts = next(c for c in candidates if "walnuts" in c.source_name_en.lower())
+    assert walnuts.protein_per_100g is not None
+    assert walnuts.fat_per_100g is not None
+    assert walnuts.carbs_per_100g is not None
+    assert walnuts.fiber_per_100g is not None
+
+
 async def test_retrieve_met_candidates_finds_camminata(db_session):
     await seed_all(db_session)
     candidates = await retrieve_met_candidates(db_session, "camminata veloce")

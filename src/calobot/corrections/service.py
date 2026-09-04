@@ -105,7 +105,22 @@ async def amend_food_quantity(
 ) -> FoodEntry:
     """Recomputes kcal from the entry's existing kcal_per_100g - correcting only the
     quantity does not require re-resolving energy (specs/entry-correction -
-    Correcting a quantity)."""
+    Correcting a quantity). Macro grams are rescaled by the same grams ratio, since
+    the entry has no separately stored per-100g macro rate to recompute from
+    directly (specs/food-logging - Food entry macro-nutrient contents: a doubled
+    portion doubles macros consistently with kcal)."""
+    old_grams = entry.grams
+    ratio = new_grams / old_grams if old_grams else None
+
+    def rescale(grams_value: float | None) -> float | None:
+        if grams_value is None or ratio is None:
+            return grams_value
+        return grams_value * ratio
+
+    entry.protein_g = rescale(entry.protein_g)
+    entry.fat_g = rescale(entry.fat_g)
+    entry.carbs_g = rescale(entry.carbs_g)
+    entry.fiber_g = rescale(entry.fiber_g)
     entry.grams = new_grams
     entry.kcal = entry.kcal_per_100g * new_grams / 100.0
     await session.flush()

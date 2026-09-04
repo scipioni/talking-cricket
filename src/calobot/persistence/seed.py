@@ -18,18 +18,39 @@ def _read_csv(filename: str) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def _optional_float(row: dict[str, str], key: str) -> float | None:
+    value = row.get(key, "")
+    return float(value) if value else None
+
+
 async def seed_food_data(session: AsyncSession) -> int:
-    existing = (await session.execute(select(FoodDataRow.source_name_en))).scalars().all()
-    existing_names = set(existing)
+    existing_rows = (await session.execute(select(FoodDataRow))).scalars().all()
+    existing_by_name = {row.source_name_en: row for row in existing_rows}
 
     inserted = 0
     for row in _read_csv("food_data.csv"):
-        if row["source_name_en"] in existing_names:
+        existing = existing_by_name.get(row["source_name_en"])
+        if existing is not None:
+            # A row seeded before the macro columns existed (add-macro-nutrient-tracking)
+            # would otherwise stay null forever, since this loop only inserts missing
+            # rows - backfill its macro columns from the CSV if they're still unset.
+            if existing.protein_per_100g is None:
+                existing.protein_per_100g = _optional_float(row, "protein_per_100g")
+            if existing.fat_per_100g is None:
+                existing.fat_per_100g = _optional_float(row, "fat_per_100g")
+            if existing.carbs_per_100g is None:
+                existing.carbs_per_100g = _optional_float(row, "carbs_per_100g")
+            if existing.fiber_per_100g is None:
+                existing.fiber_per_100g = _optional_float(row, "fiber_per_100g")
             continue
         session.add(
             FoodDataRow(
                 source_name_en=row["source_name_en"],
                 kcal_per_100g=float(row["kcal_per_100g"]),
+                protein_per_100g=_optional_float(row, "protein_per_100g"),
+                fat_per_100g=_optional_float(row, "fat_per_100g"),
+                carbs_per_100g=_optional_float(row, "carbs_per_100g"),
+                fiber_per_100g=_optional_float(row, "fiber_per_100g"),
                 aliases_it=row["aliases_it"],
             )
         )

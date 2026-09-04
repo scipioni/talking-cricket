@@ -10,8 +10,11 @@ answer-callback handler untested for food and activity.
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from harness.state import create_onboarded_user, food_extraction
 
+from calobot.persistence.models import FoodEntry
 from calobot.persistence.seed import seed_all
 
 
@@ -30,6 +33,25 @@ async def test_food_with_explicit_grams_resolves_from_table(db_session, client, 
     assert len(sent) == 1
     assert "noci" in sent[0].text
     assert "🗑 elimina" in sent[0].options  # entry controls attached, so it was stored
+
+
+async def test_food_with_explicit_grams_stores_macros_scaled_to_portion(db_session, client, llm):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(description="noci", quantity_grams=10),
+        {"selected_candidate_id": 1},  # matches the seeded Walnuts row
+    )
+
+    await client.say("ho mangiato 10g di noci")
+
+    entry = (await db_session.execute(select(FoodEntry))).scalars().one()
+    assert entry.protein_g == 1.52
+    assert entry.fat_g == 6.52
+    assert entry.carbs_g == 1.37
+    assert entry.fiber_g == 0.67
 
 
 async def test_food_with_vague_portion_asks_then_stores(db_session, client, llm):
@@ -204,6 +226,61 @@ async def test_report_message_end_to_end(db_session, client, llm):
 
     assert len(sent) == 1
     assert "dati" in sent[0].text.lower()  # nothing logged -> "non ci sono dati"
+
+
+async def test_macro_report_with_no_data(db_session, client, llm):
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": None, "topic": "macros"},
+    )
+
+    sent = await client.say("distribuzione di proteine, grassi, carboidrati e fibre di oggi")
+
+    assert len(sent) == 1
+    assert "macronutrienti" in sent[0].text.lower()
+    assert "non ci sono dati" in sent[0].text.lower()
+
+
+async def test_macro_report_over_a_week_sends_a_chart(db_session, client, llm):
+    from calobot.persistence.models import FoodEntry, Provenance
+    from calobot.persistence.repository import get_user_by_telegram_id
+    from calobot.persistence.timeutil import utcnow
+
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+    user = await get_user_by_telegram_id(db_session, 42)
+
+    db_session.add(
+        FoodEntry(
+            user_id=user.id,
+            description="noci",
+            grams=10,
+            kcal_per_100g=654,
+            kcal=65.4,
+            protein_g=1.52,
+            fat_g=6.52,
+            carbs_g=1.37,
+            fiber_g=0.67,
+            provenance=Provenance.tabella,
+            consumed_at=utcnow(),
+        )
+    )
+    await db_session.flush()
+
+    llm.push(
+        {"intent": "report", "ignored_text": None},
+        {"period_text": "questa settimana", "topic": "macros"},
+    )
+
+    sent = await client.say("il grafico della distribuzione di proteine, grassi, carboidrati e fibre di questa settimana")
+
+    assert len(sent) == 1
+    assert "macronutrienti" in sent[0].text.lower()
+    assert "proteine 2g" in sent[0].text.lower()
+    assert sent[0].has_image
 
 
 async def test_report_daily_rolling_average_and_weight_formatting(db_session, client, llm):

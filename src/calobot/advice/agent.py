@@ -46,8 +46,12 @@ Hai a disposizione strumenti di sola lettura per recuperare i suoi dati reali. R
   gia' pronto tutto cio' che serve per rispondere.
 - Per la categoria 2, NON chiamare nessuno strumento: non serve alcun dato personale
   per rispondere, la risposta verra' data dalle tue conoscenze generali.
-- Il bot NON traccia macronutrienti, sodio, zuccheri o altri valori nutrizionali oltre
-  alle calorie: non esiste uno strumento per quelli, e non devi inventarli.
+- Il bot traccia anche i macronutrienti (proteine, grassi, carboidrati, fibre), ma tu
+  non hai uno strumento per recuperarli in questa modalità conversazionale: non stimarli
+  né inventarli. Se l'utente chiede valori precisi di macronutrienti, invitalo a
+  chiedere un report sui macronutrienti (es. "distribuzione di proteine, grassi,
+  carboidrati e fibre di questa settimana"). Il bot non traccia invece sodio, zuccheri o
+  altri valori nutrizionali oltre a calorie e macronutrienti.
 - Quando ritieni di avere abbastanza dati (o di non averne bisogno), fermati: non
   chiamare altri strumenti.
 - Se nel messaggio dell'utente ci sono pronomi o riferimenti ambigui (es. 'che proprietà hanno', 'quali sono le sue proprietà'), usa la cronologia dei messaggi inclusa nel prompt per identificare a quale alimento, peso o attività si riferisce l'utente.
@@ -108,9 +112,10 @@ _SUGGESTION_COMMON = """\
   prevalentemente ad alta densita', e orienta la proposta di conseguenza. Se
   "no_data" e' true non inventare un pattern: non affermare nulla sulla varieta'
   recente.
-- Il bot NON traccia i macronutrienti (carboidrati, grassi, proteine): non indicare MAI
-  una quantita' in grammi di un macronutriente, ragiona solo qualitativamente sulle
-  descrizioni dei cibi.
+- Anche se il bot traccia i macronutrienti (carboidrati, grassi, proteine, fibre) tramite
+  il report dedicato, in questo suggerimento non indicare MAI una quantita' in grammi di
+  un macronutriente: ragiona solo qualitativamente sulle descrizioni dei cibi, per non
+  dare un suggerimento un tono clinico che non e' appropriato in questo contesto.
 - Le calorie che attribuisci a un piatto che proponi sono una STIMA, non un dato del
   diario: presentale come approssimative (es. "circa 300 kcal") e non sommarle ne'
   sottrarle ai totali o al budget dell'utente.

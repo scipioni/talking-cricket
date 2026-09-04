@@ -98,7 +98,7 @@ class CorrectionExtraction(BaseModel):
 
 class ReportExtraction(BaseModel):
     period_text: str | None = None  # e.g. "questo mese", "l'ultima settimana"
-    topic: Literal["food", "weight", "activity", "all"] = "all"
+    topic: Literal["food", "weight", "activity", "macros", "all"] = "all"
 
 
 class ClarificationReplyExtraction(BaseModel):

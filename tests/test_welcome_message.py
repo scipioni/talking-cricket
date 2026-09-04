@@ -67,14 +67,16 @@ def test_help_text_lists_the_commands():
         assert command in HELP_TEXT
 
 
-def test_help_text_states_that_macronutrients_are_not_tracked():
+def test_help_text_states_that_macronutrients_are_tracked_but_sodium_and_sugar_are_not():
     """specs/help-and-welcome - The help text states what the bot does not track,
     scenario 'A user wonders whether macronutrients are tracked'."""
     lowered = HELP_TEXT.lower()
 
     assert "calorie" in lowered
-    assert "non traccio i macronutrienti" in lowered
+    assert "macronutrienti" in lowered
     assert "proteine" in lowered
+    assert "non traccio" in lowered
+    assert "sodio" in lowered
 
 
 def test_self_description_promises_nothing_clinical():

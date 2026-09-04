@@ -76,6 +76,48 @@ def render_weight_chart(
     return buf.getvalue()
 
 
+MACRO_COLORS = {
+    "protein": "#3B6EA5",
+    "fat": "#D9822B",
+    "carbs": "#4C9A5A",
+    "fiber": "#8E6BAF",
+}
+MACRO_LABELS_IT = {
+    "protein": "proteine",
+    "fat": "grassi",
+    "carbs": "carboidrati",
+    "fiber": "fibre",
+}
+
+
+def render_macro_chart(daily_macros: dict[dt.date, dict[str, float]]) -> bytes:
+    """specs/reporting - Charts: a stacked bar per day, one fixed color per macro."""
+    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=120)
+
+    days = sorted(daily_macros.keys())
+    bottom = [0.0] * len(days)
+    for macro in ("protein", "fat", "carbs", "fiber"):
+        values = [daily_macros[d][macro] for d in days]
+        ax.bar(
+            days,
+            values,
+            bottom=bottom,
+            color=MACRO_COLORS[macro],
+            label=MACRO_LABELS_IT[macro],
+        )
+        bottom = [b + v for b, v in zip(bottom, values, strict=True)]
+
+    ax.set_ylabel("grammi")
+    ax.set_title("Distribuzione macronutrienti")
+    ax.legend(loc="best")
+    fig.autofmt_xdate()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()
+
+
 def render_calorie_chart(daily_kcal: dict[dt.date, float], budget_kcal: float | None) -> bytes:
     fig, ax = plt.subplots(figsize=(8, 4.5), dpi=120)
 

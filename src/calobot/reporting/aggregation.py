@@ -41,6 +41,20 @@ class FoodReport:
 
 
 @dataclass(frozen=True)
+class MacroReport:
+    protein_total_g: float
+    protein_avg_g: float
+    fat_total_g: float
+    fat_avg_g: float
+    carbs_total_g: float
+    carbs_avg_g: float
+    fiber_total_g: float
+    fiber_avg_g: float
+    days_with_no_data: list[dt.date]
+    has_data: bool
+
+
+@dataclass(frozen=True)
 class ActivityReport:
     total_minutes: float
     days_with_activity: int
@@ -141,6 +155,77 @@ async def build_daily_kcal_breakdown(
     for e in entries:
         day = e.consumed_at.astimezone(tz).date()
         breakdown[day] = breakdown.get(day, 0.0) + e.kcal
+    return breakdown
+
+
+async def build_macro_report(
+    session: AsyncSession, user_id: int, period: Period, reference_day: dt.date, tz
+) -> MacroReport:
+    """specs/reporting - Macro report contents. Each macro's total skips entries
+    where that macro is absent independently of the others (an entry missing fiber
+    still contributes to the protein total); the daily-average denominator is the
+    days with any food logged, the same denominator the calorie report uses, so
+    days with no logged food are identified rather than counted as zero-gram days."""
+    start, end = period_bounds_utc(period, reference_day, tz)
+    entries = await get_entries_in_range(session, "food", user_id, start, end)
+
+    if not entries:
+        return MacroReport(
+            protein_total_g=0,
+            protein_avg_g=0,
+            fat_total_g=0,
+            fat_avg_g=0,
+            carbs_total_g=0,
+            carbs_avg_g=0,
+            fiber_total_g=0,
+            fiber_avg_g=0,
+            days_with_no_data=[],
+            has_data=False,
+        )
+
+    days_with_data = {e.consumed_at.astimezone(tz).date() for e in entries}
+    start_day = start.astimezone(tz).date()
+    end_day = end.astimezone(tz).date()
+    all_days = _all_days_in_range(start_day, end_day)
+    days_with_no_data = [d for d in all_days if d not in days_with_data and d <= today_local()]
+    num_days = max(len(days_with_data), 1)
+
+    def total_and_avg(attr: str) -> tuple[float, float]:
+        total = sum(v for e in entries if (v := getattr(e, attr)) is not None)
+        return total, total / num_days
+
+    protein_total, protein_avg = total_and_avg("protein_g")
+    fat_total, fat_avg = total_and_avg("fat_g")
+    carbs_total, carbs_avg = total_and_avg("carbs_g")
+    fiber_total, fiber_avg = total_and_avg("fiber_g")
+
+    return MacroReport(
+        protein_total_g=protein_total,
+        protein_avg_g=protein_avg,
+        fat_total_g=fat_total,
+        fat_avg_g=fat_avg,
+        carbs_total_g=carbs_total,
+        carbs_avg_g=carbs_avg,
+        fiber_total_g=fiber_total,
+        fiber_avg_g=fiber_avg,
+        days_with_no_data=days_with_no_data,
+        has_data=True,
+    )
+
+
+async def build_daily_macro_breakdown(
+    session: AsyncSession, user_id: int, period: Period, reference_day: dt.date, tz
+) -> dict[dt.date, dict[str, float]]:
+    start, end = period_bounds_utc(period, reference_day, tz)
+    entries = await get_entries_in_range(session, "food", user_id, start, end)
+    breakdown: dict[dt.date, dict[str, float]] = {}
+    for e in entries:
+        day = e.consumed_at.astimezone(tz).date()
+        day_totals = breakdown.setdefault(day, {"protein": 0.0, "fat": 0.0, "carbs": 0.0, "fiber": 0.0})
+        day_totals["protein"] += e.protein_g or 0.0
+        day_totals["fat"] += e.fat_g or 0.0
+        day_totals["carbs"] += e.carbs_g or 0.0
+        day_totals["fiber"] += e.fiber_g or 0.0
     return breakdown
 
 

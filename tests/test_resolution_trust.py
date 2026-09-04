@@ -51,6 +51,39 @@ async def test_lower_trust_does_not_overwrite_higher_trust(db_session):
     assert cached.provenance == Provenance.etichetta
 
 
+async def test_macros_follow_the_same_trust_ordering_as_kcal(db_session):
+    key = normalize_description("barretta ai cereali")
+    await write_resolution(
+        db_session,
+        key=key,
+        kcal_per_100g=430,
+        provenance=Provenance.tabella,
+        display_name_it="Barretta ai cereali",
+        protein_per_100g=8.0,
+        fat_per_100g=20.0,
+        carbs_per_100g=64.0,
+        fiber_per_100g=5.0,
+    )
+
+    await write_resolution(
+        db_session,
+        key=key,
+        kcal_per_100g=999,
+        provenance=Provenance.llm,
+        display_name_it="x",
+        protein_per_100g=1.0,
+        fat_per_100g=1.0,
+        carbs_per_100g=1.0,
+        fiber_per_100g=1.0,
+    )
+
+    cached = await _cached(db_session, key)
+    assert cached.protein_per_100g == 8.0
+    assert cached.fat_per_100g == 20.0
+    assert cached.carbs_per_100g == 64.0
+    assert cached.fiber_per_100g == 5.0
+
+
 async def test_off_does_not_overwrite_etichetta_but_does_overwrite_tabella(db_session):
     key = normalize_description("yogurt bianco")
     await write_resolution(

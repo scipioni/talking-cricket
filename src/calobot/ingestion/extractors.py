@@ -95,7 +95,9 @@ L'utente chiede un report/riepilogo. Estrai:
 period_text: il periodo richiesto in linguaggio naturale (es. "questa settimana",
 "questo mese"), oppure null se non specificato.
 topic: "food" se chiede solo di calorie/cibo, "weight" se chiede solo di peso,
-"activity" se chiede solo di attività, altrimenti "all".
+"activity" se chiede solo di attività, "macros" se chiede di proteine, grassi,
+carboidrati o fibre (singolarmente o come distribuzione/ripartizione), altrimenti
+"all".
 """
 
 

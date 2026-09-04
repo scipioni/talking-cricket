@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from calobot.corrections.service import (
     AlreadyDeleted,
     Deleted,
@@ -101,3 +103,49 @@ async def test_amend_food_quantity_recomputes_kcal(db_session):
     updated = await amend_food_quantity(db_session, entry, 20.0)
     assert updated.grams == 20.0
     assert updated.kcal == 130.8
+
+
+async def test_amend_food_quantity_rescales_macros(db_session):
+    user = await create_user(db_session, telegram_user_id=6)
+    entry = FoodEntry(
+        user_id=user.id,
+        description="noci",
+        grams=10,
+        kcal_per_100g=654,
+        kcal=65.4,
+        protein_g=1.52,
+        fat_g=6.52,
+        carbs_g=1.37,
+        fiber_g=0.67,
+        provenance=Provenance.tabella,
+        consumed_at=utcnow(),
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    updated = await amend_food_quantity(db_session, entry, 20.0)
+    assert updated.protein_g == pytest.approx(3.04)
+    assert updated.fat_g == pytest.approx(13.04)
+    assert updated.carbs_g == pytest.approx(2.74)
+    assert updated.fiber_g == pytest.approx(1.34)
+
+
+async def test_amend_food_quantity_leaves_null_macros_null(db_session):
+    user = await create_user(db_session, telegram_user_id=7)
+    entry = FoodEntry(
+        user_id=user.id,
+        description="alimento senza macro",
+        grams=10,
+        kcal_per_100g=100,
+        kcal=10,
+        provenance=Provenance.llm,
+        consumed_at=utcnow(),
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    updated = await amend_food_quantity(db_session, entry, 20.0)
+    assert updated.protein_g is None
+    assert updated.fat_g is None
+    assert updated.carbs_g is None
+    assert updated.fiber_g is None

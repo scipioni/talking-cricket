@@ -120,10 +120,18 @@ value.
 
 #### Scenario: Product does not track the requested quantity
 
-- **WHEN** a user asks about macronutrients, sodium, sugar or any other quantity the
-  bot does not record
+- **WHEN** a user asks about sodium, sugar or any other quantity the bot does not
+  record
 - **THEN** the system says plainly that it does not track it, and does not produce an
   estimate
+
+#### Scenario: User asks about macronutrients conversationally
+
+- **WHEN** a user asks the agent about macronutrients (e.g. how much protein they ate)
+  outside of a standard report request
+- **THEN** the agent does not estimate or invent a figure, and tells the user to ask for
+  a macro report instead, since macronutrients are tracked but this conversational path
+  has no retrieval for them
 
 #### Scenario: Nothing logged in the period asked about
 
@@ -195,10 +203,11 @@ retrieve the user's food entries from the last few days and take their variety a
 apparent macronutrient balance into account when framing the suggestion, reasoning about
 it qualitatively from the food descriptions (e.g. noting an apparent lack of a protein
 source, or a run of high-density foods) in the same way the dietician review does, and
-SHALL NOT state a specific gram amount of any macronutrient, since the system does not
-track macronutrients as structured data. Retrieving the remaining balance and the recent
-food entries SHALL NOT depend on the language model choosing to perform two separate
-retrievals.
+SHALL NOT state a specific gram amount of any macronutrient in this suggestion — a
+deliberate choice to keep a conversational suggestion qualitative and non-clinical in
+tone, independent of whether macro grams are recorded elsewhere in the reporting
+capability. Retrieving the remaining balance and the recent food entries SHALL NOT depend
+on the language model choosing to perform two separate retrievals.
 
 #### Scenario: Recipe suggestion within budget
 - **WHEN** the user asks "cosa posso mangiare stasera" and has a positive remaining calorie balance today (such as 400 kcal)

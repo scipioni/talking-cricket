@@ -133,6 +133,13 @@ class FoodEntry(Base):
     grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     kcal_per_100g: Mapped[float] = mapped_column(Float)
     kcal: Mapped[float] = mapped_column(Float)
+    # Null when the macro could not be resolved for this food (see
+    # specs/food-logging - Food entry macro-nutrient contents), or when grams itself
+    # is unresolved and there is nothing to scale a per-100g value by.
+    protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiber_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     provenance: Mapped[Provenance] = mapped_column(Enum(Provenance))
     consumed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -168,6 +175,10 @@ class ResolutionCache(Base):
 
     normalized_key: Mapped[str] = mapped_column(String, primary_key=True)
     kcal_per_100g: Mapped[float] = mapped_column(Float)
+    protein_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiber_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     provenance: Mapped[Provenance] = mapped_column(Enum(Provenance))
     display_name_it: Mapped[str] = mapped_column(String)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -214,6 +225,10 @@ class FoodDataRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_name_en: Mapped[str] = mapped_column(String)
     kcal_per_100g: Mapped[float] = mapped_column(Float)
+    protein_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiber_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     aliases_it: Mapped[str] = mapped_column(String)  # semicolon-separated
 
 

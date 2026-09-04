@@ -128,7 +128,9 @@ HELP_TEXT = (
     "🏃‍♂️ Attività: <i>\"un'ora di camminata\"</i>, <i>\"mezz'ora di corsa stamattina\"</i>\n"
     "⚖️ Peso: <i>\"oggi peso 78kg\"</i>\n"
     "📊 Report: <i>\"report settimanale\"</i>, <i>\"come è andato il mese\"</i> - "
-    "da una settimana in su ci aggiungo anche un commento del nutrizionista\n\n"
+    "da una settimana in su ci aggiungo anche un commento del nutrizionista\n"
+    "🥩 Macronutrienti: <i>\"distribuzione di proteine, grassi, carboidrati e fibre "
+    "delle ultime 2 settimane\"</i>\n\n"
     "Puoi farmi domande sui tuoi dati e chiedermi consigli:\n"
     "❓ <i>\"come sono andato questa settimana?\"</i>, <i>\"sto perdendo peso?\"</i>, "
     "<i>\"cosa ho mangiato ieri?\"</i>\n"
@@ -142,8 +144,8 @@ HELP_TEXT = (
     "Per correggere un dato del tuo profilo, scrivimelo direttamente (es. \"la mia "
     "data di nascita è 16/5/1990\", \"ora il mio peso obiettivo è 74kg\") - te lo "
     "chiedo prima di applicarlo.\n\n"
-    "ℹ️ Tengo il conto delle <b>calorie</b>: non traccio i macronutrienti (proteine, "
-    "grassi, carboidrati) né sodio o zuccheri, quindi su quelli non posso darti numeri."
+    "ℹ️ Tengo il conto di <b>calorie</b> e macronutrienti (proteine, grassi, carboidrati "
+    "e fibre); non traccio invece sodio o zuccheri, quindi su quelli non posso darti numeri."
 )
 
 

@@ -178,12 +178,23 @@ async def finalize_item(
         grams = resolved["portion_grams"]
         kcal = energy.kcal_per_100g * grams / 100.0
 
+    def scale_macro(per_100g: float | None) -> float | None:
+        # specs/food-logging - Food entry macro-nutrient contents: a macro that can't
+        # be resolved, or grams itself being unresolved, is stored as absent, never 0.
+        if per_100g is None or grams is None:
+            return None
+        return per_100g * grams / 100.0
+
     entry = FoodEntry(
         user_id=user_id,
         description=description,
         grams=grams,
         kcal_per_100g=energy.kcal_per_100g,
         kcal=kcal,
+        protein_g=scale_macro(energy.protein_per_100g),
+        fat_g=scale_macro(energy.fat_per_100g),
+        carbs_g=scale_macro(energy.carbs_per_100g),
+        fiber_g=scale_macro(energy.fiber_per_100g),
         provenance=energy.provenance,
         consumed_at=resolve_when(item.get("when_text"), tz),
     )

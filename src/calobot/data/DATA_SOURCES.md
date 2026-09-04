@@ -39,6 +39,23 @@ generic entry in a US-centric database (`Prosciutto crudo`, `Bresaola`,
 letting them fall through to LLM estimation at runtime, which is the documented
 fallback for exactly this case) is a fair next step, not a defect to hide.
 
+## `food_data.csv` — `protein_per_100g`, `fat_per_100g`, `carbs_per_100g`, `fiber_per_100g`
+
+Added by `add-macro-nutrient-tracking` (see `openspec/changes/`). Unlike `kcal_per_100g`,
+these four columns were **not** individually matched against a downloaded FDC export row by
+row — no such download was available in the environment this change was authored in. They
+are standard, widely-published nutrition figures for each named food, filled in from general
+nutrition knowledge as a documented best-effort placeholder for every one of the 161 rows
+(not only the 26 rows already called out above as hand-authored estimates for
+`kcal_per_100g`). They are **not held to the same per-row FDC verification** the energy
+column has.
+
+Anyone tightening this later should treat it the same way the original `kcal_per_100g` fuzzy
+top-1 attempt was treated: re-derive these four columns from an actual FDC (or other CC0/
+public-domain) download, nutrient IDs 203 (protein), 204 (fat), 205 (carbohydrate) and 291
+(fiber), reviewing each match individually rather than trusting an automated join — same
+rationale as the walnut/cauliflower mismatch noted below for energy.
+
 ## `food_data.csv` — `aliases_it` column (the Italian alias index)
 
 Generated to let fuzzy retrieval work against Italian text even though the source
@@ -68,6 +85,7 @@ activity; the selection, wording and Italian phrasing are original to this proje
 | File | Obligation |
 |---|---|
 | `food_data.csv` (energy values) | None — public domain facts / USDA-style public domain source |
+| `food_data.csv` (macro values) | None — physiological facts, not a copyrightable selection; not yet individually FDC-verified (see above) |
 | `food_data.csv` (`aliases_it`) | None — original compilation |
 | `met_data.csv` | None — original compilation |
 
