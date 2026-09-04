@@ -119,6 +119,98 @@ async def test_dietician_review_rejects_a_period_shorter_than_a_week(db_session,
     assert "settimana" in result["reason"]
 
 
+async def test_period_comparison_reports_deltas_between_weeks(db_session, settings, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    current_week_monday = dt.date(2026, 8, 17)
+    previous_week_monday = dt.date(2026, 8, 10)
+    for offset in range(3):
+        db_session.add(
+            _make_entry(
+                user.id,
+                "pasto",
+                200,
+                200,
+                dt.datetime.combine(current_week_monday + dt.timedelta(days=offset), dt.time(12), tzinfo=dt.UTC),
+            )
+        )
+        db_session.add(
+            _make_entry(
+                user.id,
+                "pasto",
+                200,
+                100,
+                dt.datetime.combine(previous_week_monday + dt.timedelta(days=offset), dt.time(12), tzinfo=dt.UTC),
+            )
+        )
+    await db_session.flush()
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_period_comparison"].handler(
+        PeriodQuery(period="week", reference_day=current_week_monday)
+    )
+
+    assert result["no_data"] is False
+    assert result["has_previous_period_data"] is True
+    assert result["calories_avg_current_kcal"] == 400
+    assert result["calories_avg_previous_kcal"] == 200
+    assert result["calories_avg_delta_kcal"] == 200
+    assert result["logging_consistency"]["enough_data"] is True
+    assert result["calorie_density_trend"]["enough_data"] is True
+
+
+async def test_period_comparison_with_only_current_period_data(db_session, settings, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    current_week_monday = dt.date(2026, 8, 17)
+    when = dt.datetime.combine(current_week_monday, dt.time(12), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "pasto", 200, 200, when))
+    await db_session.flush()
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_period_comparison"].handler(
+        PeriodQuery(period="week", reference_day=current_week_monday)
+    )
+
+    assert result["no_data"] is False
+    assert result["has_previous_period_data"] is False
+    assert result["calories_avg_previous_kcal"] is None
+    assert result["calories_avg_delta_kcal"] is None
+
+
+async def test_period_comparison_signals_report_insufficient_data(db_session, settings, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    current_week_monday = dt.date(2026, 8, 17)
+    when = dt.datetime.combine(current_week_monday, dt.time(12), tzinfo=dt.UTC)
+    db_session.add(_make_entry(user.id, "pasto", 200, 200, when))
+    await db_session.flush()
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_period_comparison"].handler(
+        PeriodQuery(period="week", reference_day=current_week_monday)
+    )
+
+    # A full elapsed week is enough to compute a (low) consistency ratio, but a
+    # single logged day is not enough to establish a meal-timing or density signal.
+    assert result["logging_consistency"]["enough_data"] is True
+    assert result["logging_consistency"]["ratio_current"] == 1 / 7
+    assert result["meal_timing_drift"]["enough_data"] is False
+    assert result["calorie_density_trend"]["enough_data"] is False
+
+
+async def test_period_comparison_reports_no_data_for_an_empty_period(db_session, settings, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+
+    tools = await _registry(db_session, llm.gateway, settings.timezone, user)
+    result = await tools["get_period_comparison"].handler(
+        PeriodQuery(period="week", reference_day=dt.date(2020, 1, 1))
+    )
+
+    assert result["no_data"] is True
+
+
 async def test_list_food_entries_returns_compact_facts(db_session, settings, llm):
     await seed_all(db_session)
     user = await create_onboarded_user(db_session, 42)

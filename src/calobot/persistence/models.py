@@ -66,6 +66,33 @@ class DraftIntent(enum.StrEnum):
     profile = "profile"
 
 
+class AdviceSurface(enum.StrEnum):
+    """Which part of the bot produced a recorded piece of advice. See
+    specs/advice-memory - Advice is recorded by the code that emits it."""
+
+    dietician_review = "dietician_review"
+    daily_advice = "daily_advice"
+    advice_agent = "advice_agent"
+
+
+class AdviceTopic(enum.StrEnum):
+    """Assigned once, deterministically, at write time by
+    `calobot.advice.memory.classify_topic` (design.md - Decisions). A record whose
+    text matches neither pattern has no topic and never enters outcome resolution."""
+
+    meal_timing = "meal_timing"
+    logging_consistency = "logging_consistency"
+
+
+class AdviceOutcome(enum.StrEnum):
+    """See specs/advice-memory - Outcome is determined deterministically where
+    possible. Starts and, for a topic-less record, stays `undetermined` forever."""
+
+    undetermined = "undetermined"
+    followed = "followed"
+    not_followed = "not_followed"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -81,6 +108,9 @@ class User(Base):
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)
     disclaimer_shown: Mapped[bool] = mapped_column(Boolean, default=False)
     photo_notice_shown: Mapped[bool] = mapped_column(Boolean, default=False)
+    # specs/proactive-nudges - Nudges are off until a user opts in.
+    nudges_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_nudge_sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     activity_levels: Mapped[list[ActivityLevelHistory]] = relationship(
@@ -90,6 +120,7 @@ class User(Base):
     activity_entries: Mapped[list[ActivityEntry]] = relationship(back_populates="user")
     weight_entries: Mapped[list[WeightEntry]] = relationship(back_populates="user")
     pending_drafts: Mapped[list[PendingDraft]] = relationship(back_populates="user")
+    advice_records: Mapped[list[AdviceRecord]] = relationship(back_populates="user")
 
 
 class ActivityLevelHistory(Base):
@@ -215,6 +246,32 @@ class PendingDraft(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="pending_drafts")
+
+
+class AdviceRecord(Base):
+    """Durable record of advice given to a user. See specs/advice-memory. Soft-deleted
+    like a logged entry (`deleted_at`), though nothing sets it yet - the proposal
+    calls for the convention regardless (design.md - Decisions); /cancellami still
+    hard-deletes it via `hard_delete_user`."""
+
+    __tablename__ = "advice_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    surface: Mapped[AdviceSurface] = mapped_column(Enum(AdviceSurface))
+    # A short code-chosen label such as "dietician_tip_week" or "meal_suggestion",
+    # used to find "the previous tip of the same kind" for suppression.
+    category: Mapped[str] = mapped_column(String)
+    content: Mapped[str] = mapped_column(String)
+    # Short code-authored description of what prompted the advice (report period,
+    # suggestion mode), never raw user message text.
+    situation: Mapped[str] = mapped_column(String)
+    topic: Mapped[AdviceTopic | None] = mapped_column(Enum(AdviceTopic), nullable=True)
+    outcome: Mapped[AdviceOutcome] = mapped_column(Enum(AdviceOutcome), default=AdviceOutcome.undetermined)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="advice_records")
 
 
 class FoodDataRow(Base):

@@ -90,11 +90,13 @@ def test_self_description_promises_nothing_clinical():
 
 def test_help_text_describes_no_unimplemented_capability():
     """specs/help-and-welcome - scenario 'An example is shown for an unimplemented
-    capability': guards against advertising the planned proactive/reminder work before
-    it ships."""
+    capability': guards against advertising unshipped work. proactive-nudges has
+    since shipped (default-off, opt-in via /notifiche_on), so mentioning it here is
+    no longer premature - only "promemoria" and the two open-ended reminder phrasings
+    remain unshipped."""
     lowered = HELP_TEXT.lower()
 
-    for unshipped in ("promemoria", "ti ricorderò", "ti scriverò io", "notifiche"):
+    for unshipped in ("promemoria", "ti ricorderò", "ti scriverò io"):
         assert unshipped not in lowered
 
 

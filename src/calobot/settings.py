@@ -82,6 +82,22 @@ class Settings(BaseSettings):
     # answer ends the gather loop rather than looping indefinitely.
     llm_advice_max_rounds: int = 4
 
+    # In-process periodic job scheduler (specs/background-scheduling). Off entirely
+    # disables the background task; no job is registered by this setting alone.
+    scheduler_enabled: bool = True
+    scheduler_tick_interval_seconds: float = 60.0
+    scheduler_shutdown_grace_seconds: float = 10.0
+
+    # Proactive nudges (specs/proactive-nudges). All defaults are chosen to keep the
+    # cadence low; nudges are off per-user regardless (nudges_enabled defaults False).
+    nudge_check_interval_seconds: float = 3600.0
+    nudge_min_interval_days: int = 3
+    nudge_quiet_hours_start: int = 22
+    nudge_quiet_hours_end: int = 8
+    nudge_streak_break_days: int = 4
+    nudge_goal_reached_recency_days: int = 3
+    nudge_suggestion_min_age_days: int = 7
+
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str = "http://localhost:8083/api/auth/callback"

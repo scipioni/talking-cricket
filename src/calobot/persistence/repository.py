@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from calobot.persistence.models import (
     ActivityEntry,
     ActivityLevelHistory,
+    AdviceOutcome,
+    AdviceRecord,
+    AdviceSurface,
+    AdviceTopic,
     FoodEntry,
     PendingDraft,
     User,
@@ -160,9 +164,87 @@ async def get_current_activity_level(
     return result.scalar_one_or_none()
 
 
+async def create_advice_record(
+    session: AsyncSession,
+    user_id: int,
+    surface: AdviceSurface,
+    category: str,
+    content: str,
+    situation: str,
+    topic: AdviceTopic | None,
+) -> AdviceRecord:
+    record = AdviceRecord(
+        user_id=user_id,
+        surface=surface,
+        category=category,
+        content=content,
+        situation=situation,
+        topic=topic,
+    )
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def get_recent_advice_records(
+    session: AsyncSession, user_id: int, limit: int = 20
+) -> list[AdviceRecord]:
+    result = await session.execute(
+        select(AdviceRecord)
+        .where(AdviceRecord.user_id == user_id, AdviceRecord.deleted_at.is_(None))
+        .order_by(AdviceRecord.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_latest_advice_by_category(
+    session: AsyncSession, user_id: int, category: str
+) -> AdviceRecord | None:
+    result = await session.execute(
+        select(AdviceRecord)
+        .where(
+            AdviceRecord.user_id == user_id,
+            AdviceRecord.deleted_at.is_(None),
+            AdviceRecord.category == category,
+        )
+        .order_by(AdviceRecord.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_undetermined_advice_by_topic(
+    session: AsyncSession, user_id: int, topic: AdviceTopic
+) -> list[AdviceRecord]:
+    result = await session.execute(
+        select(AdviceRecord).where(
+            AdviceRecord.user_id == user_id,
+            AdviceRecord.deleted_at.is_(None),
+            AdviceRecord.topic == topic,
+            AdviceRecord.outcome == AdviceOutcome.undetermined,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def set_advice_outcome(session: AsyncSession, record: AdviceRecord, outcome: AdviceOutcome) -> None:
+    record.outcome = outcome
+    await session.flush()
+
+
+async def get_nudge_eligible_users(session: AsyncSession) -> list[User]:
+    """Non-deleted users who have opted into proactive nudges (specs/proactive-
+    nudges - Nudges are off until a user opts in)."""
+    result = await session.execute(
+        select(User).where(User.deleted_at.is_(None), User.nudges_enabled.is_(True))
+    )
+    return list(result.scalars().all())
+
+
 async def hard_delete_user(session: AsyncSession, user_id: int) -> None:
     """The one place soft-deletion does not apply (design.md - Safety)."""
-    for model in (FoodEntry, ActivityEntry, WeightEntry, ActivityLevelHistory, PendingDraft):
+    for model in (FoodEntry, ActivityEntry, WeightEntry, ActivityLevelHistory, PendingDraft, AdviceRecord):
         rows = (
             await session.execute(select(model).where(model.user_id == user_id))
         ).scalars().all()

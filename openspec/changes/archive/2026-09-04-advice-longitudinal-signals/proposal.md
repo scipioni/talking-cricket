@@ -28,8 +28,10 @@ recomputes its impressions from scratch every time.
 - State explicitly, per signal, how much data it needs before it means anything, and
   return "not enough data" rather than a weak signal — the existing "Too little data to
   support the answer" scenario currently has no deterministic backing.
-- Keep every signal qualitative-or-counted only. No macronutrient claim becomes possible
-  here, since the system still does not track macronutrients.
+- Keep every signal about consistency, timing and calorie density only. Macronutrients
+  are now tracked (`add-macro-nutrient-tracking`), but a macro trend signal is out of
+  scope here — it would need its own "how much data before it means anything" treatment
+  and is left for a follow-up change rather than folded in here.
 
 **Non-goals:** no new user-visible command, no change to what reports render, no
 storage of computed signals (they are derived on read, like every existing report).

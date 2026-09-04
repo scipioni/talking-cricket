@@ -14,11 +14,12 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from calobot.advice.memory import record_advice
 from calobot.advice.tools import SuggestionMode, build_tool_registry
 from calobot.llm.content import MessageContent, TextContent
 from calobot.llm.errors import LLMError
 from calobot.llm.gateway import LLMGateway, ToolCallResult
-from calobot.persistence.models import User
+from calobot.persistence.models import AdviceSurface, User
 from calobot.safety.claims import asserts_a_record
 from calobot.safety.conversation import handle_other
 from calobot.safety.medical import REFUSAL_TEXT, is_medical_topic
@@ -44,6 +45,17 @@ Hai a disposizione strumenti di sola lettura per recuperare i suoi dati reali. R
 - Se l'utente chiede un consiglio su cosa mangiare o una ricetta (es. "cosa mi
   consigli di mangiare stasera?"), usa `get_meal_suggestion_context`: ti restituisce
   gia' pronto tutto cio' che serve per rispondere.
+- Se l'utente chiede se sta migliorando o come si sta comportando ultimamente rispetto
+  a prima (es. "sto migliorando?", "come mi sto comportando ultimamente?"), usa
+  `get_period_comparison`: confronta gia' il periodo con quello precedente e include
+  segnali comportamentali (costanza, orario dei pasti, densita' calorica) con
+  indicato se i dati sono sufficienti. Non dedurre tu un confronto sottraendo due
+  totali ottenuti da altri strumenti: se serve un confronto tra periodi, usa questo
+  strumento invece.
+- Se l'utente chiede se un consiglio dato in precedenza ha funzionato o cosa gli era
+  stato consigliato (es. "il consiglio di ieri ha funzionato?", "cosa mi avevi
+  consigliato?"), usa `get_advice_history`: contiene gia' i consigli passati e il
+  loro esito, se determinabile.
 - Per la categoria 2, NON chiamare nessuno strumento: non serve alcun dato personale
   per rispondere, la risposta verra' data dalle tue conoscenze generali.
 - Il bot traccia anche i macronutrienti (proteine, grassi, carboidrati, fibre), ma tu
@@ -382,5 +394,18 @@ async def answer(
             result.suggestion_mode,
             result.suggested_kcal_total,
         )
-        return _suggestion_fallback(derived.mode, derived.remaining_kcal)
+        reply = _suggestion_fallback(derived.mode, derived.remaining_kcal)
+
+    if derived is not None:
+        # Recorded outside the model's own tools, from the deterministically derived
+        # situation - never from the model claiming what it suggested (specs/advice-
+        # memory - Advice is recorded by the code that emits it).
+        await record_advice(
+            session,
+            user,
+            AdviceSurface.advice_agent,
+            "meal_suggestion",
+            reply,
+            situation=f"suggestion_mode={derived.mode}",
+        )
     return reply

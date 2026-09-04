@@ -36,12 +36,15 @@ language model's general knowledge alone.
 ### Requirement: Reported figures come from deterministic computation
 
 Every quantity the system states about the user's logged food, weight or activity — a
-total, an average, a difference, a count, a budget, a remaining balance or a
-projection — SHALL be produced by the same deterministic computation that produces the
-bot's reports. The language model SHALL select which data to retrieve and SHALL phrase
-the explanation, and SHALL NOT compute, derive, adjust or round any such figure that is
-presented to the user. A figure about food the user has not eaten is not a figure about
-their logged data and is governed by the requirement on estimated figures for suggested
+total, an average, a difference, a count, a budget, a remaining balance, a projection,
+a period-over-period comparison, or a behavioural signal such as logging consistency,
+meal-timing drift or calorie-density trend — SHALL be produced by the same
+deterministic computation that produces the bot's reports. The language model SHALL
+select which data to retrieve and SHALL phrase the explanation, and SHALL NOT compute,
+derive, adjust or round any such figure that is presented to the user, and SHALL NOT
+reconstruct a comparison or a behavioural pattern itself from two figures it was shown
+separately. A figure about food the user has not eaten is not a figure about their
+logged data and is governed by the requirement on estimated figures for suggested
 dishes.
 
 #### Scenario: Total asked for directly
@@ -63,12 +66,23 @@ dishes.
 - **THEN** that figure is the one the deterministic budget computation returned, not a
   figure the model arrived at itself
 
+#### Scenario: Question comparing this period with how the user usually is
+
+- **WHEN** a user asks "sto migliorando?" or "come mi sto comportando ultimamente?"
+- **THEN** the answer is built from a period-over-period comparison and behavioural
+  signals produced by deterministic computation, not from the model subtracting two
+  totals it retrieved separately
+
 ### Requirement: The agent's data access is read-only
 
 The tools available to the agent SHALL be read-only. An advice interaction SHALL NOT
 create, modify, soft-delete or hard-delete any food, weight or activity entry, and
 SHALL NOT alter the user's profile, goal or budget. No advice interaction SHALL
-produce a claim that anything was recorded, changed or removed.
+produce a claim that anything was recorded, changed or removed. This requirement
+governs the tools the model can call; it does not prevent the surrounding code from
+recording, outside of any tool, that a meal suggestion was made — that record is
+written deterministically by the code that composes the suggestion, never by a tool
+the model invokes, and never claimed by the model itself.
 
 #### Scenario: User states a meal while asking a question
 
@@ -89,6 +103,12 @@ produce a claim that anything was recorded, changed or removed.
 - **WHEN** the generated answer asserts that data was recorded or modified
 - **THEN** that answer is not delivered as written, because the interaction stored
   nothing
+
+#### Scenario: A meal suggestion is recorded outside the model's tools
+
+- **WHEN** the advice agent answers with a meal suggestion
+- **THEN** the suggestion is recorded by the surrounding code once the answer is
+  finalized, and the model's own tool set remains unable to write anything
 
 ### Requirement: User identity is bound outside the conversation
 
@@ -116,7 +136,9 @@ Retrieval SHALL state explicitly when the data needed to answer does not exist,
 distinguishing "the user logged nothing in this period" from "this product does not
 track that at all". When an answer would require data that does not exist, the system
 SHALL say it cannot answer and why, and SHALL NOT estimate, infer or substitute a
-value.
+value. A behavioural signal (logging consistency, meal-timing drift, calorie-density
+trend) or a period comparison that does not have enough logged data behind it SHALL be
+reported as insufficient rather than stated as a weak or tentative pattern.
 
 #### Scenario: Product does not track the requested quantity
 
@@ -141,9 +163,10 @@ value.
 
 #### Scenario: Too little data to support the answer
 
-- **WHEN** a question needs a behavioural pattern but the period holds too few
-  logged days to establish one
-- **THEN** the system says so rather than asserting a pattern
+- **WHEN** a question needs a behavioural pattern but the period, or the period it is
+  being compared against, holds too few logged days to establish one
+- **THEN** the system says there is not enough data for that specific signal rather
+  than asserting a pattern or stating it weakly
 
 ### Requirement: The agent's work is bounded
 

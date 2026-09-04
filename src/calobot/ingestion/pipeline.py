@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.activity import planner as activity_planner
 from calobot.advice.agent import answer as advice_answer
+from calobot.advice.memory import previous_unresolved_tip, record_advice
 from calobot.corrections.service import amend_food_quantity
 from calobot.food import planner as food_planner
 from calobot.food.resolver import normalize_description, resolve_food_energy, write_resolution
@@ -32,7 +33,7 @@ from calobot.ingestion.responses import OutgoingMessage
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.content import ImageContent, MessageContent, TextContent
 from calobot.llm.gateway import LLMGateway
-from calobot.persistence.models import ActivityEntry, DraftIntent, FoodEntry, Provenance, User
+from calobot.persistence.models import ActivityEntry, AdviceSurface, DraftIntent, FoodEntry, Provenance, User
 from calobot.persistence.repository import get_entries_in_range, get_last_entry, get_latest_weight
 from calobot.persistence.timeutil import period_bounds_utc, today_in_timezone
 from calobot.photo.barcode import decode_barcode
@@ -61,7 +62,12 @@ from calobot.reporting.aggregation import (
     build_weight_report,
 )
 from calobot.reporting.charts import render_calorie_chart, render_macro_chart, render_weight_chart
-from calobot.reporting.dietician import build_daily_advice, build_dietitian_review, format_dietician_review
+from calobot.reporting.dietician import (
+    DieticianReview,
+    build_daily_advice,
+    build_dietitian_review,
+    format_dietician_review,
+)
 from calobot.reporting.periods import parse_period
 from calobot.settings import Settings
 from calobot.weight.normalizer import normalize_weight_text
@@ -1049,9 +1055,22 @@ class MessagePipeline:
                     # Add dietician review for weekly/monthly food reports
                     start, end = period_bounds_utc(period, reference_day, self.tz)
                     entries = await get_entries_in_range(self.session, "food", self.user.id, start, end)
-                    review = await build_dietitian_review(self.gateway, entries, self.tz, period)
+                    tip_category = "dietician_tip_week" if period == "week" else "dietician_tip_general"
+                    avoid_repeating = await previous_unresolved_tip(self.session, self.user, tip_category)
+                    review = await build_dietitian_review(
+                        self.gateway, entries, self.tz, period, avoid_repeating=avoid_repeating
+                    )
                     if review:
                         text += format_dietician_review(review)
+                    if isinstance(review, DieticianReview):
+                        await record_advice(
+                            self.session,
+                            self.user,
+                            AdviceSurface.dietician_review,
+                            tip_category,
+                            review.actionable_tip,
+                            situation=f"period={period}",
+                        )
                 else:
                     start, end = period_bounds_utc(period, reference_day, self.tz)
                     entries_today = await get_entries_in_range(self.session, "food", self.user.id, start, end)
@@ -1060,11 +1079,24 @@ class MessagePipeline:
                         if budget_kcal is not None
                         else None
                     )
+                    avoid_repeating = await previous_unresolved_tip(self.session, self.user, "daily_rest_of_day")
                     advice = await build_daily_advice(
-                        self.gateway, entries_today, remaining_kcal, food_report.activity_credit_kcal
+                        self.gateway,
+                        entries_today,
+                        remaining_kcal,
+                        food_report.activity_credit_kcal,
+                        avoid_repeating=avoid_repeating,
                     )
                     if advice:
                         text += f"\n\n💡 {advice}"
+                        await record_advice(
+                            self.session,
+                            self.user,
+                            AdviceSurface.daily_advice,
+                            "daily_rest_of_day",
+                            advice,
+                            situation="daily_report",
+                        )
 
                 messages.append(OutgoingMessage(text=text, photo_png=photo))
 

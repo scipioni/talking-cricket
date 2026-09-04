@@ -166,15 +166,30 @@ def get_dietician_signals(entries: list[FoodEntry], tz: Any) -> dict[str, Any]:
     }
 
 
+_AVOID_REPEATING_TEMPLATE = """
+Non hai ancora ricevuto conferma che questo consiglio precedente sia stato seguito o
+meno: "{previous_tip}"
+Non ripeterlo testualmente: se e' ancora valido, riformulalo o proponi una sfumatura
+diversa; se non lo e' piu', proponi un consiglio diverso.
+"""
+
+
 async def build_dietitian_review(
-    gateway: LLMGateway, entries: list[FoodEntry], tz: Any, period: Period
+    gateway: LLMGateway,
+    entries: list[FoodEntry],
+    tz: Any,
+    period: Period,
+    *,
+    avoid_repeating: str | None = None,
 ) -> DieticianReview | str | None:
     """Builds the dietician review. Returns DieticianReview if successful,
     a fallback string if there is insufficient data (< 3 distinct days logged),
     or None if no entries exist. `period` tiers the actionable_tip framing:
     rest-of-week for "week", general habit (with qualitative macro balance)
     for "month"/"year" (specs/dietician-reviews - Dietician review structured
-    schema)."""
+    schema). `avoid_repeating`, when set, is the text of the user's most recent
+    unresolved tip of the same period tier (specs/advice-memory - A recent
+    unresolved actionable tip is not repeated verbatim)."""
     if not entries:
         return None
 
@@ -195,6 +210,8 @@ async def build_dietitian_review(
 
     tip_framing = _WEEK_TIP_FRAMING if period == "week" else _GENERAL_HABIT_TIP_FRAMING
     system_prompt = DIETICIAN_SYSTEM_PROMPT + tip_framing
+    if avoid_repeating:
+        system_prompt += _AVOID_REPEATING_TEMPLATE.format(previous_tip=avoid_repeating)
 
     try:
         review = await gateway.call_structured(
@@ -236,10 +253,13 @@ async def build_daily_advice(
     entries_today: list[FoodEntry],
     remaining_kcal: float | None,
     activity_credit_kcal: float,
+    *,
+    avoid_repeating: str | None = None,
 ) -> str | None:
     """Rest-of-day advice for the daily calorie report. Returns None when no food
     was logged today, or when the LLM call fails (specs/reporting - Calorie report
-    contents: rest-of-day advice)."""
+    contents: rest-of-day advice). `avoid_repeating` mirrors
+    `build_dietitian_review`'s parameter of the same name."""
     if not entries_today:
         return None
 
@@ -260,10 +280,14 @@ async def build_daily_advice(
         "Ecco cosa l'utente ha mangiato oggi finora:\n\n" f"{json.dumps(signals, indent=2, ensure_ascii=False)}"
     )
 
+    system_prompt = DAILY_ADVICE_SYSTEM_PROMPT
+    if avoid_repeating:
+        system_prompt += _AVOID_REPEATING_TEMPLATE.format(previous_tip=avoid_repeating)
+
     try:
         result = await gateway.call_structured(
             step="extract",
-            system_prompt=DAILY_ADVICE_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             content=TextContent(text=prompt_content),
             schema=DailyAdvice,
         )

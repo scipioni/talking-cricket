@@ -18,6 +18,7 @@ from calobot.persistence.engine import get_session_factory, init_engine
 from calobot.persistence.migrate import run_migrations
 from calobot.persistence.seed import seed_all
 from calobot.persistence.startup_checks import ensure_database_not_on_network_fs
+from calobot.scheduler import Scheduler
 from calobot.settings import Settings, get_settings
 from calobot.telegram.handlers import router
 from calobot.telegram.logging_middleware import (
@@ -54,6 +55,8 @@ async def _async_main(settings: Settings) -> None:
             BotCommand(command="cancellami", description="Elimina definitivamente tutti i dati"),
             BotCommand(command="memory_off", description="Attiva modalità nessuna ritenzione (test)"),
             BotCommand(command="memory_on", description="Riattiva la modalità normale"),
+            BotCommand(command="notifiche_on", description="Ricevi notifiche occasionali rilevanti"),
+            BotCommand(command="notifiche_off", description="Disattiva le notifiche"),
             BotCommand(command="help", description="Mostra i comandi disponibili"),
         ]
     )
@@ -80,9 +83,23 @@ async def _async_main(settings: Settings) -> None:
     )
     server = uvicorn.Server(config)
 
+    scheduler = Scheduler(
+        enabled=settings.scheduler_enabled,
+        tick_interval_seconds=settings.scheduler_tick_interval_seconds,
+        shutdown_grace_seconds=settings.scheduler_shutdown_grace_seconds,
+    )
+    # specs/proactive-nudges - Nudge evaluation runs as a scheduled job. Every
+    # user is off by default (User.nudges_enabled), so registering the job here
+    # sends nothing on its own.
+    from calobot.nudges.service import run_nudge_cycle
+
+    scheduler.register(
+        "proactive_nudges", settings.nudge_check_interval_seconds, lambda: run_nudge_cycle(bot, settings)
+    )
+
     logger.info("web interface listening on http://localhost:%d", settings.web_port)
     logger.info(
-        "starting concurrent bot long polling and telemetry fastapi web server on port %d",
+        "starting concurrent bot long polling, telemetry fastapi web server on port %d, and job scheduler",
         settings.web_port,
     )
 
@@ -90,6 +107,7 @@ async def _async_main(settings: Settings) -> None:
         await asyncio.gather(
             dispatcher.start_polling(bot, settings=settings),
             server.serve(),
+            scheduler.run(),
         )
     finally:
         telemetry_history.stop_listening()

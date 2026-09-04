@@ -48,7 +48,7 @@ from calobot.profile.service import (
     register_or_get_user,
 )
 from calobot.settings import Settings
-from calobot.telegram.keyboards import entry_controls_keyboard, options_keyboard
+from calobot.telegram.keyboards import CALLBACK_NUDGE_STOP, entry_controls_keyboard, options_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,8 @@ HELP_TEXT = (
     "/cancellami - elimina definitivamente tutti i tuoi dati\n"
     "/memory_off - attiva la modalità nessuna ritenzione (per testare il bot senza salvare i dati)\n"
     "/memory_on - riattiva la modalità normale\n"
+    "/notifiche_on - ricevi ogni tanto un messaggio se c'è qualcosa di rilevante da dirti\n"
+    "/notifiche_off - disattiva questi messaggi (disattivati di default)\n"
     "/help - mostra questo messaggio\n\n"
     "Per registrare dati, scrivimi semplicemente in chat! Ad esempio:\n"
     "🍎 Cibo: <i>\"ho mangiato una mela\"</i>, <i>\"pasta al pomodoro ieri sera\"</i>\n"
@@ -317,6 +319,56 @@ async def on_memory_on(message: Message) -> None:
         "Modalità normale riattivata. Le tue prossime azioni verranno "
         "regolarmente salvate nel database."
     )
+
+
+@router.message(Command("notifiche_on"))
+async def on_nudges_on(message: Message) -> None:
+    telegram_user_id = _telegram_user_id(message)
+    if telegram_user_id is None:
+        return
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        user = await get_user_by_telegram_id(session, telegram_user_id)
+        if user is None:
+            await message.answer("Usa prima /start per registrarti.")
+            return
+        user.nudges_enabled = True
+        await session.commit()
+    await message.answer(
+        "Notifiche attivate. Potresti ricevere un messaggio ogni tanto se c'è "
+        "qualcosa di rilevante da dirti (mai più di uno ogni pochi giorni). "
+        "Usa /notifiche_off per disattivarle in qualsiasi momento."
+    )
+
+
+@router.message(Command("notifiche_off"))
+async def on_nudges_off(message: Message) -> None:
+    telegram_user_id = _telegram_user_id(message)
+    if telegram_user_id is None:
+        return
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        user = await get_user_by_telegram_id(session, telegram_user_id)
+        if user is None:
+            return
+        user.nudges_enabled = False
+        await session.commit()
+    await message.answer("Notifiche disattivate.")
+
+
+@router.callback_query(F.data == CALLBACK_NUDGE_STOP)
+async def on_nudge_stop_callback(callback: CallbackQuery, bot: Bot) -> None:
+    if callback.message is None:
+        return
+    chat_id = callback.message.chat.id
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        user = await get_user_by_telegram_id(session, callback.from_user.id)
+        if user is not None:
+            user.nudges_enabled = False
+            await session.commit()
+    await callback.answer("Notifiche disattivate.")
+    await bot.send_message(chat_id, "Notifiche disattivate. Puoi riattivarle quando vuoi con /notifiche_on.")
 
 
 @router.message(Command("annulla"))

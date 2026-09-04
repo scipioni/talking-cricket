@@ -274,6 +274,7 @@ async def format_profile_summary(session: AsyncSession, user: User) -> str:
     budget = await current_budget(session, user)
     if budget is not None:
         lines.append(f"Budget calorico giornaliero: {budget.target_kcal:.0f} kcal")
+    lines.append(f"Notifiche: {'attive' if user.nudges_enabled else 'disattivate'}")
     return "\n".join(lines)
 
 

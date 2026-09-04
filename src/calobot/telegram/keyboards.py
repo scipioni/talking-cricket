@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 CALLBACK_ANSWER_PREFIX = "ans:"
 CALLBACK_ENTRY_PREFIX = "entry:"
+CALLBACK_NUDGE_STOP = "nudge:stop"
 
 
 def options_keyboard(options: list[str]) -> InlineKeyboardMarkup | None:
@@ -19,6 +20,14 @@ def options_keyboard(options: list[str]) -> InlineKeyboardMarkup | None:
         for opt in options
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def nudge_stop_keyboard() -> InlineKeyboardMarkup:
+    """Attached to every nudge (specs/proactive-nudges - Nudges are off until a
+    user opts in: 'tapping the stop control included with a nudge')."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔕 Disattiva notifiche", callback_data=CALLBACK_NUDGE_STOP)]]
+    )
 
 
 def entry_controls_keyboard(kind: str, entry_id: int) -> InlineKeyboardMarkup:
