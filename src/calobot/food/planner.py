@@ -16,6 +16,7 @@ from calobot.food.resolver import resolve_food_energy
 from calobot.ingestion.quantities import is_real_quantity
 from calobot.ingestion.schemas import FoodExtraction, FoodItemExtraction
 from calobot.llm.gateway import LLMGateway
+from calobot.persistence.candidates import table_portions_for
 from calobot.persistence.models import FoodEntry, Provenance
 from calobot.persistence.timeutil import resolve_when_text, utcnow
 
@@ -89,10 +90,19 @@ async def check_item(
         fields = _as_extraction_fields(item)
         quantity = resolve_quantity(fields)
         if quantity is None:
+            # The table's reference portions for this food, so the buttons are the
+            # food's own scale rather than the generic plate-size fallback. The map
+            # displayed is stored on the item: apply_answer maps the tapped label
+            # against it, and cannot re-run this lookup (it has no session - and
+            # re-running it could return different candidates).
+            options = portion_options_for(
+                fields, await table_portions_for(session, item["description"])
+            )
+            item["portion_options"] = options
             return ClarificationNeeded(
                 field="portion_grams",
                 question_text=f"Quanto pesava la porzione di {item['description']}?",
-                options=list(portion_options_for(fields).keys()),
+                options=list(options.keys()),
             )
         resolved["portion_grams"] = quantity.grams
         resolved["quantity_is_estimated_from_count"] = quantity.is_estimated_from_count
@@ -114,7 +124,14 @@ def apply_answer(item: dict[str, Any], field: str, raw_answer: str) -> dict[str,
     can't be parsed, so check_item re-asks instead of crashing at finalize time."""
     resolved = dict(item.get("resolved", {}))
     if field == "portion_grams":
-        grams = portion_options_for(_as_extraction_fields(item)).get(raw_answer)
+        # The map displayed with the question, stored on the item when it was asked:
+        # the label must resolve to the grams it showed, whatever a fresh lookup
+        # would say now.
+        shown_options = item.get("portion_options")
+        if shown_options is not None:
+            grams = shown_options.get(raw_answer)
+        else:
+            grams = portion_options_for(_as_extraction_fields(item)).get(raw_answer)
         if grams is None:
             grams = _parse_grams_free_text(raw_answer)
         # A user can type "0 grammi" as easily as the model can extract it, so the

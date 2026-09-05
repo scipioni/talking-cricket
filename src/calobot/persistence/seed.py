@@ -42,6 +42,14 @@ async def seed_food_data(session: AsyncSession) -> int:
                 existing.carbs_per_100g = _optional_float(row, "carbs_per_100g")
             if existing.fiber_per_100g is None:
                 existing.fiber_per_100g = _optional_float(row, "fiber_per_100g")
+            # Same backfill for the reference portions (food-table-reference-portions):
+            # a row seeded before the columns existed stays null forever otherwise.
+            if existing.portion_small_g is None:
+                existing.portion_small_g = _optional_float(row, "portion_small_g")
+            if existing.portion_medium_g is None:
+                existing.portion_medium_g = _optional_float(row, "portion_medium_g")
+            if existing.portion_generous_g is None:
+                existing.portion_generous_g = _optional_float(row, "portion_generous_g")
             continue
         session.add(
             FoodDataRow(
@@ -52,6 +60,9 @@ async def seed_food_data(session: AsyncSession) -> int:
                 carbs_per_100g=_optional_float(row, "carbs_per_100g"),
                 fiber_per_100g=_optional_float(row, "fiber_per_100g"),
                 aliases_it=row["aliases_it"],
+                portion_small_g=_optional_float(row, "portion_small_g"),
+                portion_medium_g=_optional_float(row, "portion_medium_g"),
+                portion_generous_g=_optional_float(row, "portion_generous_g"),
             )
         )
         inserted += 1

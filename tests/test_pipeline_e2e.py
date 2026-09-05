@@ -82,9 +82,11 @@ async def test_food_with_vague_portion_asks_then_stores(db_session, client, llm)
 
 
 async def test_vague_portion_options_are_scaled_to_the_food(db_session, client, llm):
-    """A condiment and a plate of pasta don't share a portion scale: when extraction
-    supplies food-specific estimates alongside the household measure, those - not the
-    generic 80/120/180g buttons - are what gets offered and stored."""
+    """A condiment and a plate of pasta don't share a portion scale. The bundled
+    table's reference portions outrank the extraction's estimates when both exist:
+    maionese is in the table, so its curated 10/15/30g scale is what gets offered -
+    the extraction's 10/20/40g are never consulted - and the tapped button stores
+    the grams it displayed (specs/food-logging - Quantity resolution)."""
     await seed_all(db_session)
     await create_onboarded_user(db_session, 42)
 
@@ -102,7 +104,7 @@ async def test_vague_portion_options_are_scaled_to_the_food(db_session, client, 
 
     sent = await client.say("un cucchiaio di maionese")
 
-    assert sent[0].labels[:3] == ["piccolo (~10g)", "medio (~20g)", "abbondante (~40g)"]
+    assert sent[0].labels[:3] == ["piccolo (~10g)", "medio (~15g)", "abbondante (~30g)"]
 
     llm.push(
         {"selected_candidate_id": None},
@@ -110,7 +112,31 @@ async def test_vague_portion_options_are_scaled_to_the_food(db_session, client, 
     )
     follow_up = await client.tap(sent[0].labels[1])
 
-    assert "20g" in follow_up[0].text
+    assert "15g" in follow_up[0].text
+
+
+async def test_vague_portion_options_fall_back_to_extraction_estimates(db_session, client, llm):
+    """A food the table does not know: the extraction's own estimates are the
+    second tier, still ahead of the generic 80/120/180g scale. (Wasabi: the fuzzy
+    floor of 80 rejects its best alias match, 'barbabietola' at 60.)"""
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(
+            description="wasabi",
+            quantity_grams=None,
+            household_measure="un piatto",
+            portion_small_g=100,
+            portion_medium_g=180,
+            portion_generous_g=300,
+        ),
+    )
+
+    sent = await client.say("un piatto di wasabi")
+
+    assert sent[0].labels[:3] == ["piccolo (~100g)", "medio (~180g)", "abbondante (~300g)"]
 
 
 async def test_preparation_options_are_scaled_to_the_food(db_session, client, llm):
@@ -650,3 +676,29 @@ async def test_conversational_nudge_toggle_is_idempotent_in_its_reply(db_session
     sent = await client.say("voglio ricevere le notifiche")
 
     assert "già attivate" in sent[0].text  # the truth: nothing changed
+
+
+async def test_vague_onion_asks_with_the_table_scale(db_session, client, llm):
+    """The report that started food-table-reference-portions: 'cipolla' used to be
+    offered the generic plate-size 80/120/180g, roughly double a real onion portion.
+    The table's curated scale is what gets offered now, and the tapped button stores
+    the grams it displayed."""
+    await seed_all(db_session)
+    await create_onboarded_user(db_session, 42)
+
+    llm.push(
+        {"intent": "food", "ignored_text": None},
+        food_extraction(description="cipolla", quantity_grams=None),
+    )
+
+    sent = await client.say("ho mangiato cipolla")
+
+    assert sent[0].labels[:3] == ["piccolo (~40g)", "medio (~60g)", "abbondante (~100g)"]
+
+    llm.push(
+        {"selected_candidate_id": None},
+        {"kcal_per_100g": 40, "display_name_it": "cipolla"},
+    )
+    follow_up = await client.tap(sent[0].labels[0])
+
+    assert "40g" in follow_up[0].text or "40 g" in follow_up[0].text

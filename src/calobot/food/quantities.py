@@ -120,23 +120,16 @@ PORTION_OPTIONS_G: dict[str, float] = {
 }
 
 
-def portion_options_for(item: FoodItemExtraction) -> dict[str, float]:
+def portion_options_for(
+    item: FoodItemExtraction, table_portions: tuple[float, float, float] | None = None
+) -> dict[str, float]:
     """A flat 80/120/180g scale fits a slice of bread as poorly as it fits a plate
-    of pasta. When extraction supplied food-specific estimates alongside a household
-    measure, use those instead of the generic fallback."""
-    if (
-        is_real_quantity(item.portion_small_g)
-        and is_real_quantity(item.portion_medium_g)
-        and is_real_quantity(item.portion_generous_g)
-    ):
-        return {
-            f"piccolo (~{item.portion_small_g:.0f}g)": item.portion_small_g,
-            f"medio (~{item.portion_medium_g:.0f}g)": item.portion_medium_g,
-            f"abbondante (~{item.portion_generous_g:.0f}g)": item.portion_generous_g,
-        }
-
-    # If the food is a known countable item (e.g. uovo, mela, banana) in TYPICAL_UNIT_WEIGHTS_G,
-    # offer multiples of its typical unit weight as intuitive portion options.
+    of pasta. The offered scale is food-specific whenever a food-specific source
+    exists, in order: multiples of the typical unit weight for a countable food (the
+    deterministic countable source, and the most natural buttons for one), the
+    bundled table's reference portions, the extraction's own estimates, and the
+    generic scale only as a last resort (specs/food-logging - Quantity
+    resolution)."""
     desc = (item.count_unit_hint or item.description or "").strip().lower()
     unit_weight = TYPICAL_UNIT_WEIGHTS_G.get(desc)
     if unit_weight is not None:
@@ -156,6 +149,25 @@ def portion_options_for(item: FoodItemExtraction) -> dict[str, float]:
             f"1 {singular} (~{unit_weight:.0f}g)": unit_weight,
             f"2 {plural} (~{unit_weight * 2:.0f}g)": unit_weight * 2,
             f"3 {plural} (~{unit_weight * 3:.0f}g)": unit_weight * 3,
+        }
+
+    if table_portions is not None:
+        small, medium, generous = table_portions
+        return {
+            f"piccolo (~{small:.0f}g)": small,
+            f"medio (~{medium:.0f}g)": medium,
+            f"abbondante (~{generous:.0f}g)": generous,
+        }
+
+    if (
+        is_real_quantity(item.portion_small_g)
+        and is_real_quantity(item.portion_medium_g)
+        and is_real_quantity(item.portion_generous_g)
+    ):
+        return {
+            f"piccolo (~{item.portion_small_g:.0f}g)": item.portion_small_g,
+            f"medio (~{item.portion_medium_g:.0f}g)": item.portion_medium_g,
+            f"abbondante (~{item.portion_generous_g:.0f}g)": item.portion_generous_g,
         }
 
     return PORTION_OPTIONS_G

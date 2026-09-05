@@ -25,6 +25,11 @@ class FoodCandidate:
     carbs_per_100g: float | None
     fiber_per_100g: float | None
     matched_alias: str
+    # Reference portions (specs/food-logging - Quantity resolution): null on rows
+    # where no portion question makes sense.
+    portion_small_g: float | None = None
+    portion_medium_g: float | None = None
+    portion_generous_g: float | None = None
 
 
 @dataclass(frozen=True)
@@ -72,12 +77,56 @@ async def retrieve_food_candidates(session: AsyncSession, query: str) -> list[Fo
                 carbs_per_100g=row.carbs_per_100g,
                 fiber_per_100g=row.fiber_per_100g,
                 matched_alias=matched_alias,
+                portion_small_g=row.portion_small_g,
+                portion_medium_g=row.portion_medium_g,
+                portion_generous_g=row.portion_generous_g,
             )
         )
         if len(candidates) >= MAX_CANDIDATES:
             break
 
     return candidates
+
+
+async def table_portions_for(
+    session: AsyncSession, description: str
+) -> tuple[float, float, float] | None:
+    """The bundled table's reference portions for a described food, or None
+    (specs/food-logging - Quantity resolution: the table's scale comes before the
+    extraction's guesses). The first retrieved candidate with a complete triple
+    wins; retrieval is the same fuzzy pass the calorie path uses, but held to a
+    similarity floor: retrieval itself has none (the calorie path can afford that
+    because the model disambiguates), and without one every query matches
+    something - 'sushi' would offer a plum's portions. 80 keeps exact and
+    inflected matches (cipolla 100, 'cipolla cotta' 90) and rejects the rest."""
+    from rapidfuzz import fuzz
+
+    rows = (await session.execute(select(FoodDataRow))).scalars().all()
+    alias_pairs: list[tuple[str, FoodDataRow]] = []
+    for row in rows:
+        for alias in row.aliases_it.split(";"):
+            alias = alias.strip()
+            if alias:
+                alias_pairs.append((alias, row))
+
+    if not alias_pairs:
+        return None
+
+    best: FoodDataRow | None = None
+    best_score = 0.0
+    for alias, row in alias_pairs:
+        score = fuzz.WRatio(description.strip().lower(), alias)
+        if score > best_score:
+            best, best_score = row, score
+    if best is None or best_score < 80:
+        return None
+    if (
+        best.portion_small_g is not None
+        and best.portion_medium_g is not None
+        and best.portion_generous_g is not None
+    ):
+        return (best.portion_small_g, best.portion_medium_g, best.portion_generous_g)
+    return None
 
 
 async def retrieve_met_candidates(session: AsyncSession, query: str) -> list[METCandidate]:

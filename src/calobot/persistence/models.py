@@ -287,6 +287,12 @@ class FoodDataRow(Base):
     carbs_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     fiber_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     aliases_it: Mapped[str] = mapped_column(String)  # semicolon-separated
+    # Self-authored typical Italian household portions (specs/food-logging - Quantity
+    # resolution): the reference scale offered as vague-portion options. Null where a
+    # portion question makes no sense; see docs/DATA_SOURCES.md.
+    portion_small_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    portion_medium_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    portion_generous_g: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class METDataRow(Base):

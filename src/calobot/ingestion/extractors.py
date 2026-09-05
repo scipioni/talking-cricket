@@ -36,11 +36,13 @@ Per ogni alimento:
   grammi di UNA singola unità di questo alimento (es. "mela" -> 180, "mandorla" -> 1.2)
 - household_measure: SOLO se la quantità è espressa in modo vago/non numerabile
   (es. "un piatto", "una porzione", "un po'") - NON stimare i grammi in questo caso
-- portion_small_g, portion_medium_g, portion_generous_g: SOLO se household_measure è
-  compilato, tre stime in grammi (piccola/media/abbondante) plausibili per QUESTO
-  alimento specifico - una salsa e un piatto di pasta non condividono la stessa scala
-  di porzioni, quindi calibra i valori sul tipo di alimento (es. un condimento va
-  stimato in decine di grammi, un primo piatto in centinaia)
+- portion_small_g, portion_medium_g, portion_generous_g: SOLO se la quantità è vaga
+  o assente (quindi anche quando l'utente ha solo nominato l'alimento, senza una
+  misura domestica), tre stime in grammi (piccola/media/abbondante) plausibili per
+  QUESTO alimento specifico - una salsa e un piatto di pasta non condividono la stessa
+  scala di porzioni, quindi calibra i valori sul tipo di alimento (es. un condimento va
+  stimato in decine di grammi, un primo piatto in centinaia). Sono solo proposte
+  tra cui l'utente sceglie, mai un peso assunto.
 - preparation: il metodo di preparazione se menzionato (es. "fritto", "bollito",
   "al forno"), altrimenti null
 - preparation_material_but_unstated: true SOLO se il modo di preparazione di questo

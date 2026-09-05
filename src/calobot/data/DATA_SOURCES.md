@@ -56,6 +56,21 @@ public-domain) download, nutrient IDs 203 (protein), 204 (fat), 205 (carbohydrat
 (fiber), reviewing each match individually rather than trusting an automated join — same
 rationale as the walnut/cauliflower mismatch noted below for energy.
 
+## `food_data.csv` — `portion_small_g`, `portion_medium_g`, `portion_generous_g`
+
+Added by `food-table-reference-portions` (see `openspec/changes/`). Typical Italian
+household portion sizes in grams of the edible item (piccolo/medio/abbondante),
+**self-authored estimates** written for this project from general dietary knowledge —
+deliberately **not** taken from CREA's *Linee guida per una sana alimentazione*
+portion tables, whose selection and arrangement carry the same licensing problem as
+the CREA energy tables (see above). They are offered as tappable suggestions in the
+vague-portion clarification, never assumed outright; a user can always type grams.
+7 of 161 rows are null (water, salt, pepper, dried basil/parsley/oregano/rosemary):
+foods for which a "quanto pesava la porzione?" question makes no sense. Anyone
+tightening these later faces the same constraint as the energy columns: CREA is not
+an option, and no other CC0 portion-table source is known — which is exactly why
+these are estimates rather than table data.
+
 ## `food_data.csv` — `aliases_it` column (the Italian alias index)
 
 Generated to let fuzzy retrieval work against Italian text even though the source
@@ -86,6 +101,7 @@ activity; the selection, wording and Italian phrasing are original to this proje
 |---|---|
 | `food_data.csv` (energy values) | None — public domain facts / USDA-style public domain source |
 | `food_data.csv` (macro values) | None — physiological facts, not a copyrightable selection; not yet individually FDC-verified (see above) |
+| `food_data.csv` (reference portions) | None — self-authored household estimates, no licensed source (see above) |
 | `food_data.csv` (`aliases_it`) | None — original compilation |
 | `met_data.csv` | None — original compilation |
 
