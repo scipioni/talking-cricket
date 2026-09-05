@@ -117,6 +117,31 @@ class RecordedUser:
         return said
 
 
+class LiteralUser:
+    """Says the intent verbatim, contacting no model.
+
+    For scenarios whose only message steps are commands and other text the bot
+    handles without the language model (specs/conversation-simulation - Live runs
+    are explicit and bounded, taken to its offline conclusion): a time-lapse
+    scenario seeded from direct state and driven through commands needs no
+    generation at all, which is what lets the default suite exercise the temporal
+    guards. Deliberately unusable for free-form intents: a scenario that handed a
+    natural-language intent to this would send that intent, unsaid, and fail
+    loudly at the bot's confusion rather than passing for the wrong reason.
+    """
+
+    def __init__(self) -> None:
+        self.persona = Persona(name="Comandi", description="Manda solo comandi.")
+
+    def supports(self, behaviour: Behaviour) -> bool:
+        return behaviour == "straight"
+
+    async def utterance(
+        self, *, intent: str, behaviour: Behaviour, replies: list[SentMessage]
+    ) -> str:
+        return intent
+
+
 class SimulatedUser:
     def __init__(self, gateway: LLMGateway, persona: Persona) -> None:
         self.gateway = gateway

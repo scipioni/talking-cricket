@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pytest
 from harness.cassette import CallCapReached, Recorder
-from harness.library import marco_three_days
+from harness.library import giulia_two_weeks, marco_three_days
+from harness.nudges import NudgeWatch
 from harness.simulation import run_scenario
 from harness.state import create_onboarded_user
 from harness.user_agent import SimulatedUser
@@ -72,4 +73,56 @@ async def test_marco_three_days_against_the_real_endpoint(
     # The run is an instrument, not a gate: it reports rather than asserting the bot
     # is perfect. What must hold is that the harness produced a usable finding set.
     assert report.verdicts, "the scenario produced no verdicts at all"
+    assert (OUTPUT_DIR / f"{scenario.name}.jsonl").exists()
+
+
+@pytest.mark.live
+async def test_giulia_two_weeks_against_the_real_endpoint(
+    db_session, run, client, settings, clock, fake_bot, monkeypatch
+):
+    """The time-lapse live run (time-lapse-simulation task 5.2): conversational
+    logging on day one, five days of silence in which the streak signal builds and
+    the nudge cycle fires, then a return - all against the real endpoint, excluded
+    from the default suite like every live run."""
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    user.nudges_enabled = True
+    await db_session.commit()
+    user_id = user.id
+
+    scenario = giulia_two_weeks()
+
+    bot_gateway = LLMGateway(settings)
+    recorder = Recorder(bot_gateway, call_cap=scenario.model_call_cap)
+    monkeypatch.setattr("calobot.telegram.handlers._gateway", lambda _s: bot_gateway)
+
+    agent = SimulatedUser(LLMGateway(settings), scenario.persona)
+
+    watch = NudgeWatch(fake_bot, settings, chat_id=42)
+
+    started = dt.datetime.now(dt.UTC)
+    try:
+        report = await run_scenario(
+            scenario,
+            run=run,
+            user=agent,
+            session=db_session,
+            user_id=user_id,
+            tz=settings.timezone,
+            clock=clock,
+            cassette=recorder.cassette,
+            cassette_path=OUTPUT_DIR / f"{scenario.name}.jsonl",
+            nudges=watch,
+        )
+    except CallCapReached as exhausted:
+        recorder.cassette.save(OUTPUT_DIR / f"{scenario.name}.partial.jsonl")
+        pytest.fail(f"{exhausted}\nthe partial recording was kept")
+
+    report.duration_seconds = (dt.datetime.now(dt.UTC) - started).total_seconds()
+    report.save(OUTPUT_DIR / f"{scenario.name}.report.json")
+
+    print(f"\n{report.render()}")
+
+    assert report.verdicts, "the scenario produced no verdicts at all"
+    assert report.jobs, "the scenario ran no nudge cycle at all"
     assert (OUTPUT_DIR / f"{scenario.name}.jsonl").exists()

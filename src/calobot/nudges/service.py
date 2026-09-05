@@ -34,10 +34,19 @@ def _in_quiet_hours(now_local: dt.datetime, settings: Settings) -> bool:
     return hour >= start or hour < end  # wraps past midnight
 
 
+def _aware(moment: dt.datetime) -> dt.datetime:
+    """SQLite returns naive datetimes even from timezone-aware columns; every read
+    path in the system treats a naive stored instant as UTC. Without this, the first
+    stored send makes the next cycle's subtraction raise TypeError - found by the
+    time-lapse harness, which is the first thing to run the cycle twice after a
+    send (openspec/changes/time-lapse-simulation)."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=dt.UTC)
+
+
 def _rate_limited(user: User, now: dt.datetime, settings: Settings) -> bool:
     if user.last_nudge_sent_at is None:
         return False
-    elapsed = now - user.last_nudge_sent_at
+    elapsed = now - _aware(user.last_nudge_sent_at)
     return elapsed < dt.timedelta(days=settings.nudge_min_interval_days)
 
 

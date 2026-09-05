@@ -18,11 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from calobot.persistence.models import FoodEntry, WeightEntry
 from calobot.persistence.timeutil import day_in_timezone
 
+from .nudges import NudgeSend
 from .scenario import (
     AskedAgain,
     DeclinedAndRedirected,
     Expectation,
+    NoNudge,
     NothingStored,
+    NudgeArrived,
+    Silence,
     Step,
     StoredFood,
     StoredWeight,
@@ -192,3 +196,46 @@ async def score(
         return verdict(True, f"recorded {kg:.1f} kg for {day}")
 
     raise TypeError(f"unhandled expectation: {expectation!r}")
+
+
+def score_silence(*, step_index: int, step: Silence, sends: list[NudgeSend]) -> Verdict:
+    """Scoring a silent span: the only thing to judge is what the bot originated in
+    it. A failed expectation reports the kind, the text and the instant of every
+    nudge observed, so the finding is readable without a transcript
+    (specs/conversation-simulation - Expectation types)."""
+    expectation = step.expect
+
+    def verdict(passed: bool, detail: str) -> Verdict:
+        return Verdict(
+            step_index=step_index,
+            passed=passed,
+            expected=expectation.describe(),
+            detail=detail,
+            intent=f"(silence until {step.until.isoformat(timespec='minutes')})",
+            said="",
+            replies=[send.text for send in sends],
+        )
+
+    def observed(sends: list[NudgeSend]) -> str:
+        return "; ".join(
+            f"{send.kind} nudge at {send.instant.isoformat()}" for send in sends
+        )
+
+    if isinstance(expectation, NoNudge):
+        if sends:
+            return verdict(False, f"but {len(sends)} arrived: {observed(sends)}")
+        return verdict(True, "the bot stayed silent for the whole span")
+
+    if isinstance(expectation, NudgeArrived):
+        if not sends:
+            return verdict(False, "but no nudge was originated")
+        kinds = sorted({send.kind for send in sends})
+        if kinds != [expectation.kind]:
+            return verdict(
+                False,
+                f"but the nudge(s) were {observed(sends)}, expected "
+                f"{expectation.kind!r}",
+            )
+        return verdict(True, f"a {expectation.kind} nudge arrived")
+
+    raise TypeError(f"unhandled originated-message expectation: {expectation!r}")

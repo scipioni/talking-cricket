@@ -19,9 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from calobot.persistence.models import FoodEntry, Provenance
 
 from .cassette import Cassette
-from .oracle import Verdict, score, snapshot
+from .nudges import NudgeWatch
+from .oracle import Verdict, score, score_silence, snapshot
 from .run import CheckedRun, Failure, RunStopped
-from .scenario import Behaviour, Scenario
+from .scenario import Behaviour, Scenario, Silence
 from .transport import SentMessage
 from .user_agent import SimulatedUser
 
@@ -65,6 +66,10 @@ class RunReport:
     metrics: Metrics | None = None
     stopped_early: bool = False
     cassette_path: str | None = None
+    # Scheduled jobs that ran inside the run, in order: which job, when, and what it
+    # originated (specs/conversation-simulation - Scheduled jobs run as simulated
+    # time advances).
+    jobs: list[dict] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -108,6 +113,13 @@ class RunReport:
                 f"  replies off the intended intent: {self.metrics.off_intent_replies}",
                 f"  resolved from the food table: {self.metrics.table_share:.0%}",
             ]
+        if self.jobs:
+            lines += ["", "jobs that ran:"]
+            for job in self.jobs:
+                lines.append(
+                    f"  {job['job']} at {job['at']}: {len(job['originated'])} originated"
+                )
+                lines += [f"    BOT: {text}" for text in job["originated"]]
         if self.model_calls or self.duration_seconds:
             lines += [
                 f"  model calls: {self.model_calls}"
@@ -133,6 +145,7 @@ class RunReport:
             "duration_seconds": round(self.duration_seconds, 1),
             "metrics": asdict(self.metrics) if self.metrics else None,
             "cassette": self.cassette_path,
+            "jobs": self.jobs,
         }
 
     def save(self, path: Path) -> Path:
@@ -182,6 +195,7 @@ async def run_scenario(
     clock=None,
     cassette: Cassette | None = None,
     cassette_path: Path | None = None,
+    nudges: NudgeWatch | None = None,
     seed: str = "seed_all + one onboarded user",
 ) -> RunReport:
     report = RunReport(
@@ -198,10 +212,69 @@ async def run_scenario(
 
     if clock is not None:
         clock.set_local(scenario.starts_at, tz)
+    if nudges is not None:
+        if clock is None:
+            raise AssertionError("a scenario with a nudge watch needs a clock")
+        run.nudges = nudges
+        await nudges.mark_origin(session, user_id, clock.now())
 
     for index, step in enumerate(scenario.steps, start=1):
+        if isinstance(step, Silence):
+            end_utc = step.until.replace(tzinfo=tz) if step.until.tzinfo is None else step.until
+            sends_before = len(nudges.sends)
+            executions_before = len(nudges.executions)
+            try:
+                await nudges.run_due(
+                    end_utc,
+                    clock=clock,
+                    restore_to=end_utc,
+                    session=session,
+                    user_id=user_id,
+                )
+                for execution in nudges.executions[executions_before:]:
+                    await run.check_nudges_after_execution(
+                        index,
+                        f"{execution.job} execution at {execution.instant.isoformat()} "
+                        "(inside a silent span)",
+                    )
+            except RunStopped as stopped:
+                report.failures.append(stopped.failure)
+                report.stopped_early = True
+                break
+            span_sends = nudges.sends[sends_before:]
+            report.verdicts.append(
+                score_silence(step_index=index, step=step, sends=span_sends)
+            )
+            report.conversation.append(
+                f"SILENCE until {step.until.isoformat(timespec='minutes')}"
+            )
+            report.conversation += [f"BOT (nudge): {send.text}" for send in span_sends]
+            continue
+
         if clock is not None and step.at is not None:
             clock.set_local(step.at, tz)
+
+        if nudges is not None:
+            now_utc = clock.now()
+            executions_before = len(nudges.executions)
+            try:
+                await nudges.run_due(
+                    now_utc,
+                    clock=clock,
+                    restore_to=now_utc,
+                    session=session,
+                    user_id=user_id,
+                )
+                for execution in nudges.executions[executions_before:]:
+                    await run.check_nudges_after_execution(
+                        index,
+                        f"{execution.job} execution at {execution.instant.isoformat()} "
+                        "(before the next action)",
+                    )
+            except RunStopped as stopped:
+                report.failures.append(stopped.failure)
+                report.stopped_early = True
+                break
 
         before = await snapshot(session, user_id)
 
@@ -251,6 +324,15 @@ async def run_scenario(
         )
 
     report.failures.extend(f for f in run.failures if f not in report.failures)
+    if nudges is not None:
+        report.jobs = [
+            {
+                "job": execution.job,
+                "at": execution.instant.isoformat(),
+                "originated": [message.text for message in execution.messages],
+            }
+            for execution in nudges.executions
+        ]
     report.metrics = await _metrics(
         session,
         user_id,

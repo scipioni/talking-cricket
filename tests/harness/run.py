@@ -9,7 +9,7 @@ Conversations must make progress).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -17,10 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from calobot.persistence.models import ActivityEntry, FoodEntry, PendingDraft, WeightEntry
 from calobot.persistence.repository import get_user_by_telegram_id
+from calobot.persistence.timeutil import utcnow
 
 from .client import Client
 from .invariants import Violation, check_all, claims_something_was_recorded
 from .transport import SentMessage
+
+if TYPE_CHECKING:
+    from .nudges import NudgeWatch
 
 FailureKind = Literal["invariant", "false-confirmation", "no-progress", "action-cap"]
 
@@ -75,6 +79,9 @@ class CheckedRun:
     progress_limit: int = DEFAULT_PROGRESS_LIMIT
     action_cap: int = DEFAULT_ACTION_CAP
     stopping_kinds: frozenset[str] = STOPPING_KINDS
+    # Present when the scenario spans time: the watch drives the nudge cycle at
+    # execution points and the temporal invariants run alongside the hard ones.
+    nudges: NudgeWatch | None = None
 
     actions: list[Action] = field(default_factory=list)
     failures: list[Failure] = field(default_factory=list)
@@ -179,6 +186,23 @@ class CheckedRun:
         if user_id is None:
             return
         for violation in await check_all(self.session, user_id, self.tz):
+            self._fail(Failure("invariant", str(violation), index, description))
+        if self.nudges is not None:
+            await self.nudges.observe(self.session, user_id, utcnow())
+            await self.check_nudges_after_execution(index, description)
+
+    async def check_nudges_after_execution(self, index: int, description: str) -> None:
+        """The temporal invariants over originated messages, attributed to the action
+        that just ran or the cycle execution that just ran - a violation fails the
+        run regardless of what the step itself expected
+        (specs/conversation-simulation - Temporal invariants over originated
+        messages)."""
+        if self.nudges is None:
+            return
+        user_id = await self._user_id()
+        if user_id is None:
+            return
+        for violation in await self.nudges.check(self.session, user_id, self.tz):
             self._fail(Failure("invariant", str(violation), index, description))
 
     async def _check_progress(self, index: int, description: str) -> None:

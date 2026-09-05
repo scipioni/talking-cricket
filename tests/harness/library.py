@@ -11,12 +11,16 @@ from __future__ import annotations
 import datetime as dt
 
 from .scenario import (
+    COOPERATIVE,
     HOSTILE,
     AskedAgain,
     DeclinedAndRedirected,
+    NoNudge,
     NothingStored,
+    NudgeArrived,
     Persona,
     Scenario,
+    Silence,
     Step,
     StoredFood,
     StoredWeight,
@@ -194,6 +198,106 @@ def marco_three_days(persona: Persona = HOSTILE) -> Scenario:
                 expect=StoredFood("pasta", 150),
                 behaviour="multi-intent",
                 at=day_three.replace(hour=21, minute=0),
+            ),
+        ],
+    )
+
+
+def giulia_breaks_her_streak() -> Scenario:
+    """The offline time-lapse scenario (openspec/changes/time-lapse-simulation, task
+    5.1): days of silence earn a broken-streak nudge; a conversational opt-out
+    outlives the run, whatever signals keep firing.
+
+    Every message step is a command, so the scenario needs no language model and
+    runs in the default suite. Its seeded state lives in
+    `harness.state.seed_streak_then_silence`.
+    """
+    start = dt.datetime(2026, 3, 2, 9, 0)  # local wall clock (Europe/Rome, CET)
+    opt_out = dt.datetime(2026, 3, 7, 10, 30)
+    end = dt.datetime(2026, 3, 10, 9, 0)
+    return Scenario(
+        name="giulia-breaks-her-streak",
+        persona=COOPERATIVE,
+        starts_at=start,
+        action_cap=5,
+        model_call_cap=0,  # the scenario contacts no model, by construction
+        steps=[
+            Silence(
+                until=dt.datetime(2026, 3, 7, 9, 0),
+                expect=NudgeArrived("broken_streak"),
+            ),
+            Step(intent="/notifiche_off", expect=NothingStored(), at=opt_out),
+            Silence(until=end, expect=NoNudge()),
+        ],
+    )
+
+
+def giulia_quiet_night() -> Scenario:
+    """The quiet-hours probe (task 5.3): the run starts an hour before quiet hours,
+    so every execution point of the first night falls inside the window the guard
+    must suppress. With the guard working, the first send is the morning one; with
+    the guard disabled, the run's own quiet-hours invariant is what catches it."""
+    start = dt.datetime(2026, 3, 2, 21, 0)
+    return Scenario(
+        name="giulia-quiet-night",
+        persona=COOPERATIVE,
+        starts_at=start,
+        action_cap=5,
+        model_call_cap=0,
+        steps=[
+            Silence(
+                until=dt.datetime(2026, 3, 3, 12, 0),
+                expect=NudgeArrived("broken_streak"),
+            ),
+        ],
+    )
+
+
+def giulia_two_weeks(persona: Persona = COOPERATIVE) -> Scenario:
+    """The live multi-day scenario (task 5.2): conversational logging on the first
+    day, then silence long enough for the streak signal to genuinely fire - the gap
+    window excludes the last food day until five days have passed - then a return.
+
+    Explicit and bounded like every live scenario; excluded from the default suite.
+    """
+    start = dt.datetime(2026, 3, 2, 8, 30)
+    return_day = dt.datetime(2026, 3, 8, 10, 30)
+    return Scenario(
+        name="giulia-two-weeks",
+        persona=persona,
+        starts_at=start,
+        action_cap=40,
+        model_call_cap=200,
+        steps=[
+            Step(
+                intent="dire che a pranzo hai mangiato 150 grammi di riso al salto",
+                expect=StoredFood("riso", 150),
+                behaviour="straight",
+                at=start.replace(hour=13, minute=15),
+            ),
+            Step(
+                intent="dire che a cena hai mangiato una bistecca da 200 grammi",
+                expect=StoredFood("bistecca", 200),
+                behaviour="straight",
+                at=start.replace(hour=20, minute=40),
+            ),
+            # Five days of total silence: the streak breaks on day five, the cycle
+            # sends at the first execution point outside quiet hours that day.
+            Silence(
+                until=dt.datetime(2026, 3, 8, 9, 0),
+                expect=NudgeArrived("broken_streak"),
+            ),
+            Step(
+                intent="dire che hai ripreso a registrare: 80 grammi di pane a colazione",
+                expect=StoredFood("pane", 80),
+                behaviour="straight",
+                at=return_day,
+            ),
+            Step(
+                intent="chiedere come sta andando il tuo budget calorico di oggi",
+                expect=NothingStored(),
+                behaviour="straight",
+                at=dt.datetime(2026, 3, 8, 18, 0),
             ),
         ],
     )

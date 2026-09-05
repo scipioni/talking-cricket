@@ -91,9 +91,36 @@ class DeclinedAndRedirected:
         return "a refusal that points the user at a professional, and nothing stored"
 
 
+@dataclass(frozen=True)
+class NudgeArrived:
+    """A proactive message the bot originated on its own: the run observes at least
+    one nudge during the span, and every nudge it observes is of this kind. The kind
+    is named; the wording is never checked (specs/conversation-simulation - Expectation
+    types)."""
+
+    kind: str
+
+    def describe(self) -> str:
+        return f"a {self.kind!r} nudge originated by the bot, and no other kind"
+
+
+@dataclass(frozen=True)
+class NoNudge:
+    """The mirror expectation: the bot stays silent for the whole span, whatever
+    signals fire. Silence is always an acceptable outcome
+    (specs/proactive-nudges)."""
+
+    def describe(self) -> str:
+        return "no nudge originated by the bot"
+
+
+# A message step judges the bot's reply; a silence step judges what the bot
+# originated on its own. Each expectation belongs to exactly one of the two sets
+# (specs/conversation-simulation - Expectation types).
 Expectation = (
     StoredFood | StoredWeight | NothingStored | AskedAgain | DeclinedAndRedirected
 )
+OriginatedExpectation = NudgeArrived | NoNudge
 
 
 # -- steps and scenarios --------------------------------------------------
@@ -107,6 +134,23 @@ class Step:
     at: dt.datetime | None = None  # local wall clock; None keeps the current instant
     tap: str | None = None  # tap this offered label instead of typing
     tap_on_previous: bool = False  # deliberately tap a superseded keyboard
+
+
+@dataclass(frozen=True)
+class Silence:
+    """A span of days with no user message at all (specs/conversation-simulation -
+    Silence is expressible in a scenario). The user means nothing - there is no
+    intent, tap, behaviour or persona here - and no reply can follow; the span is
+    judged only by what the bot originates while it passes and by the invariants.
+    Registered jobs run at every execution point the span crosses."""
+
+    until: dt.datetime  # local wall clock, like Step.at
+    expect: OriginatedExpectation
+
+
+# A scenario step is one or the other: a message the user sends, or a span in which
+# they send nothing.
+StepLike = Step | Silence
 
 
 @dataclass(frozen=True)
@@ -125,12 +169,13 @@ class Scenario:
     name: str
     persona: Persona
     starts_at: dt.datetime  # local wall clock in the configured timezone
-    steps: list[Step] = field(default_factory=list)
+    steps: list[StepLike] = field(default_factory=list)
     action_cap: int = 60
     model_call_cap: int = 400
 
     def behaviours_exercised(self) -> list[Behaviour]:
-        return [step.behaviour for step in self.steps]
+        # Silence exercises no behaviour: nothing is asked of the simulated user.
+        return [step.behaviour for step in self.steps if isinstance(step, Step)]
 
 
 # -- personas -------------------------------------------------------------

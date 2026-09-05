@@ -178,7 +178,11 @@ def _patch_session_factory(monkeypatch, db_session) -> None:
     )
 
 
-async def test_run_nudge_cycle_sends_when_opted_in_and_signal_fires(db_session, settings, monkeypatch):
+async def test_run_nudge_cycle_sends_when_opted_in_and_signal_fires(
+    db_session, settings, monkeypatch, clock
+):
+    # `clock` pins the instant: on the real wall clock this test silently failed
+    # whenever it ran inside the Rome quiet-hours window (22:00-08:00).
     user = await create_onboarded_user(db_session, 310, weight_kg=70.0)
     user.nudges_enabled = True
     user.peso_obiettivo_kg = 70.0
@@ -223,6 +227,32 @@ async def test_run_nudge_cycle_respects_rate_limit(db_session, settings, monkeyp
     await run_nudge_cycle(bot, settings)
 
     assert bot.sent == []
+
+
+async def test_cycle_survives_a_second_run_after_a_send(db_session, settings, monkeypatch, clock):
+    """Regression (found by the time-lapse harness): the send writes last_nudge_sent_at
+    as an aware instant, SQLite reads it back naive, and the next cycle's rate-limit
+    subtraction raised TypeError - killing the whole cycle, silently, forever after
+    the first send in production."""
+    user = await create_onboarded_user(db_session, 313, weight_kg=70.0)
+    user.nudges_enabled = True
+    user.peso_obiettivo_kg = 70.0
+    await db_session.flush()
+    await db_session.commit()
+
+    _patch_session_factory(monkeypatch, db_session)
+    bot = _FakeBot()
+
+    await run_nudge_cycle(bot, settings)
+    assert len(bot.sent) == 1
+
+    clock.advance(days=1)  # still inside the rate window
+    await run_nudge_cycle(bot, settings)
+    assert len(bot.sent) == 1  # rate-limited, not crashed
+
+    clock.advance(days=2)  # exactly 3 days: window elapsed, goal signal still in recency
+    await run_nudge_cycle(bot, settings)
+    assert len(bot.sent) == 2
 
 
 async def test_run_nudge_cycle_skips_no_retention_chat(db_session, settings, monkeypatch):
