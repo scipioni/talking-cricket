@@ -42,6 +42,9 @@ async def test_help_describes_the_nudge_capability(client):
     assert "/notifiche_on" in text and "/notifiche_off" in text
     assert "obiettivo di peso" in text  # one of the kinds it may originate
     assert "disattivate di default" in text  # off unless the user opts in
+    # the conversational way is described, not only the commands
+    assert "scrivimelo" in text
+    assert "basta notifiche" in text
 
 
 async def test_welcome_mentions_counts_and_opt_in_messages(client, db_session):

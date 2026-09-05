@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from harness.state import create_onboarded_user, food_extraction
 
-from calobot.persistence.models import FoodEntry
+from calobot.persistence.models import FoodEntry, User
 from calobot.persistence.seed import seed_all
 
 
@@ -593,3 +593,60 @@ async def test_cooked_pasta_preparation_preserved_and_resolved(db_session, clien
     assert entries[0].description == "pasta cotta"
     assert entries[0].kcal_per_100g == 158.0
     assert entries[0].kcal == 284.4
+
+
+async def test_conversational_nudge_enable_end_to_end(db_session, client, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    assert user.nudges_enabled is False
+
+    llm.push(
+        {"intent": "nudges", "ignored_text": None},
+        {"action": "enable"},
+    )
+
+    sent = await client.say("voglio ricevere le notifiche")
+
+    assert len(sent) == 1
+    assert "attivate" in sent[0].text
+    user_id = user.id
+    db_session.expire_all()
+    refreshed = await db_session.get(User, user_id)
+    assert refreshed.nudges_enabled is True
+
+
+async def test_conversational_nudge_disable_end_to_end(db_session, client, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    user.nudges_enabled = True
+    await db_session.commit()
+
+    llm.push(
+        {"intent": "nudges", "ignored_text": None},
+        {"action": "disable"},
+    )
+
+    sent = await client.say("basta notifiche")
+
+    assert len(sent) == 1
+    assert "disattivate" in sent[0].text
+    user_id = user.id
+    db_session.expire_all()
+    refreshed = await db_session.get(User, user_id)
+    assert refreshed.nudges_enabled is False
+
+
+async def test_conversational_nudge_toggle_is_idempotent_in_its_reply(db_session, client, llm):
+    await seed_all(db_session)
+    user = await create_onboarded_user(db_session, 42)
+    user.nudges_enabled = True
+    await db_session.commit()
+
+    llm.push(
+        {"intent": "nudges", "ignored_text": None},
+        {"action": "enable"},
+    )
+
+    sent = await client.say("voglio ricevere le notifiche")
+
+    assert "già attivate" in sent[0].text  # the truth: nothing changed

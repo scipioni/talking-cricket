@@ -25,6 +25,7 @@ from calobot.ingestion.classifier import classify
 from calobot.ingestion.extractors import (
     extract_activity,
     extract_food,
+    extract_nudges,
     extract_profile_edit,
     extract_report,
     extract_weight,
@@ -207,6 +208,8 @@ class MessagePipeline:
             messages += await self._handle_correction(raw_text)
         elif intent == "report":
             messages += await self._handle_report(content)
+        elif intent == "nudges":
+            messages += await self._handle_nudges(content)
         else:
             reply = await advice_answer(
                 self.session,
@@ -998,6 +1001,42 @@ class MessagePipeline:
         return await self._handle_correction(item["raw_text"], already_confirmed=True)
 
     # -- reports ------------------------------------------------------------
+
+    async def _handle_nudges(self, content: MessageContent) -> list[OutgoingMessage]:
+        """The conversational half of the nudge preference (specs/proactive-nudges -
+        Nudges are off until a user opts in). A toggle is instantly reversible, so
+        unlike a stored entry or a profile field there is no confirmation
+        round-trip: apply, commit, and confirm in one deterministic reply - the same
+        texts the commands send. When the statement asks for the state the user
+        already has, say that, rather than presenting it as a change."""
+        extraction = await extract_nudges(self.gateway, content)
+        enable = extraction.action == "enable"
+
+        if self.user.nudges_enabled == enable:
+            state = "attivate" if enable else "disattivate"
+            return [OutgoingMessage(text=f"Le notifiche sono già {state}.")]
+
+        self.user.nudges_enabled = enable
+        await self.session.commit()
+        if enable:
+            return [
+                OutgoingMessage(
+                    text=(
+                        "Notifiche attivate. Potresti ricevere un messaggio ogni tanto "
+                        "se c'è qualcosa di rilevante da dirti (mai più di uno ogni "
+                        "pochi giorni). "
+                        "Usa /notifiche_off per disattivarle in qualsiasi momento."
+                    )
+                )
+            ]
+        return [
+            OutgoingMessage(
+                text=(
+                    "Notifiche disattivate. Puoi riattivarle quando vuoi con "
+                    "/notifiche_on."
+                )
+            )
+        ]
 
     async def _handle_report(self, content: MessageContent) -> list[OutgoingMessage]:
         extraction = await extract_report(self.gateway, content)

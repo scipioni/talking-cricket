@@ -25,6 +25,10 @@ Classifica il messaggio dell'utente in ESATTAMENTE uno di questi intent:
 - correction: l'utente sta correggendo una voce già registrata.
   ESEMPI: "no erano 20g", "non era pasta ma riso".
 - report: l'utente chiede un report, un riepilogo o statistiche standard dei propri log (es. "report settimanale", "riepilogo di oggi", "statistiche peso").
+- nudges: l'utente sta IMPOSTANDO la preferenza sui messaggi proattivi del bot, per attivarli o disattivarli.
+  ESEMPI: "voglio ricevere le notifiche", "avvisami se smetto di registrare",
+  "basta notifiche", "non voglio più che mi scrivi".
+  Una DOMANDA sulle notifiche (es. "come disattivo le notifiche?", "cosa mi mandi?") NON è nudges: è other.
 - other: qualsiasi altra cosa puramente conversazionale, domande generiche, richieste di consiglio, o domande aperte/analitiche sul proprio andamento che NON includono un alimento, un peso o un'attività da registrare (es. domande sul funzionamento del bot, richieste di parere o stime teoriche sul peso perso basati sul deficit, come "quanti kg avrei dovuto perdere?", "perché non dimagrisco?", "sto andando bene?").
 
 GESTIONE MULTI-INTENT E CONTRADDIZIONI:

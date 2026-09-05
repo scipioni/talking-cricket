@@ -9,6 +9,7 @@ from calobot.ingestion.schemas import (
     ClarificationReplyExtraction,
     CorrectionExtraction,
     FoodExtraction,
+    NudgesExtraction,
     ProfileEditExtraction,
     ReportExtraction,
     WeightExtraction,
@@ -142,6 +143,20 @@ async def extract_correction(gateway: LLMGateway, content: MessageContent) -> Co
 async def extract_report(gateway: LLMGateway, content: MessageContent) -> ReportExtraction:
     return await gateway.call_structured(
         step="extract", system_prompt=REPORT_PROMPT, content=content, schema=ReportExtraction
+    )
+
+
+NUDGES_PROMPT = """\
+L'utente sta impostando la preferenza sui messaggi proattivi del bot. Estrai:
+action: "enable" se vuole riceverli ("voglio ricevere le notifiche", "avvisami se
+smetto di registrare"), "disable" se non li vuole più ("basta notifiche", "non
+scrivermi più per tua iniziativa").
+"""
+
+
+async def extract_nudges(gateway: LLMGateway, content: MessageContent) -> NudgesExtraction:
+    return await gateway.call_structured(
+        step="extract", system_prompt=NUDGES_PROMPT, content=content, schema=NudgesExtraction
     )
 
 

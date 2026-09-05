@@ -8,7 +8,7 @@ Turns an unstructured Italian chat message into a typed, complete and validated 
 
 ### Requirement: Classification of inbound messages
 
-The system SHALL classify every inbound user message that is not a command into exactly one intent: food, weight, activity, profile, correction, report or other. Classification SHALL precede extraction, and extraction SHALL use a schema specific to the classified intent. A message classified as other SHALL NOT result in any claim that data was recorded. Classification SHALL remain a single schema-validated call and SHALL NOT retrieve stored data in order to decide an intent. 
+The system SHALL classify every inbound user message that is not a command into exactly one intent: food, weight, activity, profile, correction, report, nudges or other. Classification SHALL precede extraction, and extraction SHALL use a schema specific to the classified intent. A message classified as other SHALL NOT result in any claim that data was recorded. Classification SHALL remain a single schema-validated call and SHALL NOT retrieve stored data in order to decide an intent. 
 
 When a user specifies a vague loggable item (such as a generic food name without quantities), the system SHALL classify the message as that loggable intent (e.g., food) rather than conversational (other), allowing it to enter the standard clarification loop to resolve the missing fields.
 
@@ -44,7 +44,7 @@ When a user specifies a vague loggable item (such as a generic food name without
 
 #### Scenario: Conversational message
 
-- **WHEN** a user writes something that is neither a log nor a profile change nor a correction nor a report request, such as a greeting or a general nutrition question
+- **WHEN** a user writes something that is neither a log nor a profile change nor a correction nor a report request nor a nudge preference, such as a greeting or a general nutrition question
 - **THEN** the message is classified as other and handed to the advice-agent capability, which answers it within the safety limits of the user-profile capability, without creating any entry and without claiming that any entry was created
 
 #### Scenario: Question about the user's own data
@@ -71,6 +71,17 @@ When a user specifies a vague loggable item (such as a generic food name without
 
 - **WHEN** a user writes a single message correcting themselves (e.g. "volevo registrare la pizza ma ho mangiato un'insalata")
 - **THEN** the system resolves the contradiction, classifies and extracts the final intent (the salad), and ignores the discarded intent silently rather than treating it as unhandled text or an edit of a past entry
+
+
+#### Scenario: A statement enabling nudges
+
+- **WHEN** a user writes that they want the bot's occasional messages, such as "voglio ricevere le notifiche"
+- **THEN** the message is classified as nudges, the preference is stored as enabled, and the change is confirmed
+
+#### Scenario: A statement disabling nudges
+
+- **WHEN** a user writes that they no longer want the bot's occasional messages, such as "basta notifiche"
+- **THEN** the message is classified as nudges, the preference is stored as disabled immediately, and no further nudge is sent until re-enabled
 
 
 ### Requirement: Draft completeness and the clarification loop

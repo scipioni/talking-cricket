@@ -8,7 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Intent = Literal["food", "weight", "activity", "profile", "correction", "report", "other"]
+Intent = Literal[
+    "food", "weight", "activity", "profile", "correction", "report", "nudges", "other"
+]
 
 # Every onboarding field except peso_attuale_kg, which is not a profile field on this
 # path - it writes a WeightEntry and stays with the weight intent (design.md - Current
@@ -99,6 +101,14 @@ class CorrectionExtraction(BaseModel):
 class ReportExtraction(BaseModel):
     period_text: str | None = None  # e.g. "questo mese", "l'ultima settimana"
     topic: Literal["food", "weight", "activity", "macros", "all"] = "all"
+
+
+class NudgesExtraction(BaseModel):
+    """The one thing a nudge-preference statement states: which state the user wants
+    (specs/proactive-nudges - Nudges are off until a user opts in, conversational
+    half)."""
+
+    action: Literal["enable", "disable"]
 
 
 class ClarificationReplyExtraction(BaseModel):

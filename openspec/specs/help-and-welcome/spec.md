@@ -46,7 +46,8 @@ logged data, asking for a meal or recipe suggestion, sending a photo, correcting
 field, and correcting an entry that was already stored. It SHALL also list the commands the
 bot responds to. It SHALL describe the proactive-nudge capability: that the bot can write
 first when the user has opted in, the kinds of messages it may originate, that nudges are
-off by default, and that one reply or the dedicated command turns them off.
+off by default, and that they are turned off by one reply, by the dedicated command, or by
+tapping the stop control on a nudge itself.
 
 #### Scenario: A user asks what the bot can do
 
@@ -71,7 +72,8 @@ off by default, and that one reply or the dedicated command turns them off.
 
 - **WHEN** a user reads the help text
 - **THEN** it states that the bot sends occasional proactive messages only after the user
-  opts in, names the kinds of message it may send, and shows how to turn them off
+  opts in, names the kinds of message it may send, and shows that they can be turned off
+  in words as well as by command
 
 ### Requirement: The help text states what the bot does not track
 
